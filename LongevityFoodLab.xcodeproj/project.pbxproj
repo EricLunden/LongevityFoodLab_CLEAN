@@ -1,0 +1,796 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C978719C2E32B87D0045D694 /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		C978719E2E32B87D0045D694 /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		C97871A02E32B87D0045D694 /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		C9F3F9F02E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C9F3F9E62E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DC59D94AF09F0B7D0F9CE819 /* amplifyconfiguration.json in Resources */ = {isa = PBXBuildFile; fileRef = 7E77068E4BC24F4D67225C52 /* amplifyconfiguration.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C957D2832E22D34200D8B940 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C957D26D2E22D34200D8B940 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C957D2742E22D34200D8B940;
+			remoteInfo = LongevityFoodLab;
+		};
+		C957D28D2E22D34200D8B940 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C957D26D2E22D34200D8B940 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C957D2742E22D34200D8B940;
+			remoteInfo = LongevityFoodLab;
+		};
+		C9F3F9EE2E7DF3CB00A46DEB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C957D26D2E22D34200D8B940 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C9F3F9E52E7DF3CB00A46DEB;
+			remoteInfo = LongevityFoodLabShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C9A2A2EA2E7B14D900F67D96 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C9F3F9F02E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		7E77068E4BC24F4D67225C52 /* amplifyconfiguration.json */ = {isa = PBXFileReference; explicitFileType = text.json; path = amplifyconfiguration.json; sourceTree = "<group>"; };
+		C957D2752E22D34200D8B940 /* LongevityFoodLab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LongevityFoodLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C957D2822E22D34200D8B940 /* LongevityFoodLabTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LongevityFoodLabTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C957D28C2E22D34200D8B940 /* LongevityFoodLabUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LongevityFoodLabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9F3F9E62E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LongevityFoodLabShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C93292072EB5223F00AA9F14 /* Exceptions for "LongevityFoodLabShareExtension" folder in "LongevityFoodLab" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				RecipeRemoteImage.swift,
+			);
+			target = C957D2742E22D34200D8B940 /* LongevityFoodLab */;
+		};
+		C94239812E4143C6003DC99D /* Exceptions for "LongevityFoodLab" folder in "LongevityFoodLab" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C957D2742E22D34200D8B940 /* LongevityFoodLab */;
+		};
+		C9F3F9F42E7DF3CB00A46DEB /* Exceptions for "LongevityFoodLabShareExtension" folder in "LongevityFoodLabShareExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C9F3F9E52E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		C957D2772E22D34200D8B940 /* LongevityFoodLab */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C94239812E4143C6003DC99D /* Exceptions for "LongevityFoodLab" folder in "LongevityFoodLab" target */,
+			);
+			path = LongevityFoodLab;
+			sourceTree = "<group>";
+		};
+		C957D2852E22D34200D8B940 /* LongevityFoodLabTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LongevityFoodLabTests;
+			sourceTree = "<group>";
+		};
+		C957D28F2E22D34200D8B940 /* LongevityFoodLabUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LongevityFoodLabUITests;
+			sourceTree = "<group>";
+		};
+		C9F3F9E72E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C93292072EB5223F00AA9F14 /* Exceptions for "LongevityFoodLabShareExtension" folder in "LongevityFoodLab" target */,
+				C9F3F9F42E7DF3CB00A46DEB /* Exceptions for "LongevityFoodLabShareExtension" folder in "LongevityFoodLabShareExtension" target */,
+			);
+			path = LongevityFoodLabShareExtension;
+			sourceTree = "<group>";
+		};
+		C9F3F9F52E7DF3CB00A46DEB /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C957D2722E22D34200D8B940 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C978719C2E32B87D0045D694 /* (null) in Frameworks */,
+				C978719E2E32B87D0045D694 /* (null) in Frameworks */,
+				C97871A02E32B87D0045D694 /* (null) in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D27F2E22D34200D8B940 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D2892E22D34200D8B940 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C9F3F9E32E7DF3CB00A46DEB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		94E8793F768D9B42F8AEE367 /* AmplifyConfig */ = {
+			isa = PBXGroup;
+			children = (
+				7E77068E4BC24F4D67225C52 /* amplifyconfiguration.json */,
+			);
+			name = AmplifyConfig;
+			sourceTree = "<group>";
+		};
+		C957D26C2E22D34200D8B940 = {
+			isa = PBXGroup;
+			children = (
+				C957D2772E22D34200D8B940 /* LongevityFoodLab */,
+				C957D2852E22D34200D8B940 /* LongevityFoodLabTests */,
+				C957D28F2E22D34200D8B940 /* LongevityFoodLabUITests */,
+				C9F3F9E72E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */,
+				C9F3F9F52E7DF3CB00A46DEB /* Shared */,
+				C97870F92E2966420045D694 /* Frameworks */,
+				C957D2762E22D34200D8B940 /* Products */,
+				94E8793F768D9B42F8AEE367 /* AmplifyConfig */,
+			);
+			sourceTree = "<group>";
+		};
+		C957D2762E22D34200D8B940 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C957D2752E22D34200D8B940 /* LongevityFoodLab.app */,
+				C957D2822E22D34200D8B940 /* LongevityFoodLabTests.xctest */,
+				C957D28C2E22D34200D8B940 /* LongevityFoodLabUITests.xctest */,
+				C9F3F9E62E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C97870F92E2966420045D694 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C957D2742E22D34200D8B940 /* LongevityFoodLab */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C957D2962E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLab" */;
+			buildPhases = (
+				C957D2712E22D34200D8B940 /* Sources */,
+				C957D2722E22D34200D8B940 /* Frameworks */,
+				C957D2732E22D34200D8B940 /* Resources */,
+				C9A2A2EA2E7B14D900F67D96 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C9F3F9EF2E7DF3CB00A46DEB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C957D2772E22D34200D8B940 /* LongevityFoodLab */,
+				C9F3F9F52E7DF3CB00A46DEB /* Shared */,
+			);
+			name = LongevityFoodLab;
+			packageProductDependencies = (
+			);
+			productName = LongevityFoodLab;
+			productReference = C957D2752E22D34200D8B940 /* LongevityFoodLab.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C957D2812E22D34200D8B940 /* LongevityFoodLabTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C957D2992E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLabTests" */;
+			buildPhases = (
+				C957D27E2E22D34200D8B940 /* Sources */,
+				C957D27F2E22D34200D8B940 /* Frameworks */,
+				C957D2802E22D34200D8B940 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C957D2842E22D34200D8B940 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C957D2852E22D34200D8B940 /* LongevityFoodLabTests */,
+			);
+			name = LongevityFoodLabTests;
+			packageProductDependencies = (
+			);
+			productName = LongevityFoodLabTests;
+			productReference = C957D2822E22D34200D8B940 /* LongevityFoodLabTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C957D28B2E22D34200D8B940 /* LongevityFoodLabUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C957D29C2E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLabUITests" */;
+			buildPhases = (
+				C957D2882E22D34200D8B940 /* Sources */,
+				C957D2892E22D34200D8B940 /* Frameworks */,
+				C957D28A2E22D34200D8B940 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C957D28E2E22D34200D8B940 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C957D28F2E22D34200D8B940 /* LongevityFoodLabUITests */,
+			);
+			name = LongevityFoodLabUITests;
+			packageProductDependencies = (
+			);
+			productName = LongevityFoodLabUITests;
+			productReference = C957D28C2E22D34200D8B940 /* LongevityFoodLabUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		C9F3F9E52E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C9F3F9F12E7DF3CB00A46DEB /* Build configuration list for PBXNativeTarget "LongevityFoodLabShareExtension" */;
+			buildPhases = (
+				C9F3F9E22E7DF3CB00A46DEB /* Sources */,
+				C9F3F9E32E7DF3CB00A46DEB /* Frameworks */,
+				C9F3F9E42E7DF3CB00A46DEB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C9F3F9E72E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */,
+				C9F3F9F52E7DF3CB00A46DEB /* Shared */,
+			);
+			name = LongevityFoodLabShareExtension;
+			packageProductDependencies = (
+			);
+			productName = LongevityFoodLabShareExtension;
+			productReference = C9F3F9E62E7DF3CB00A46DEB /* LongevityFoodLabShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C957D26D2E22D34200D8B940 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1630;
+				LastUpgradeCheck = 1630;
+				TargetAttributes = {
+					C957D2742E22D34200D8B940 = {
+						CreatedOnToolsVersion = 16.3;
+					};
+					C957D2812E22D34200D8B940 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = C957D2742E22D34200D8B940;
+					};
+					C957D28B2E22D34200D8B940 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = C957D2742E22D34200D8B940;
+					};
+					C9F3F9E52E7DF3CB00A46DEB = {
+						CreatedOnToolsVersion = 16.3;
+						LastSwiftMigration = 1630;
+					};
+				};
+			};
+			buildConfigurationList = C957D2702E22D34200D8B940 /* Build configuration list for PBXProject "LongevityFoodLab" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C957D26C2E22D34200D8B940;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C957D2762E22D34200D8B940 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C957D2742E22D34200D8B940 /* LongevityFoodLab */,
+				C957D2812E22D34200D8B940 /* LongevityFoodLabTests */,
+				C957D28B2E22D34200D8B940 /* LongevityFoodLabUITests */,
+				C9F3F9E52E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C957D2732E22D34200D8B940 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC59D94AF09F0B7D0F9CE819 /* amplifyconfiguration.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D2802E22D34200D8B940 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D28A2E22D34200D8B940 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C9F3F9E42E7DF3CB00A46DEB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C957D2712E22D34200D8B940 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D27E2E22D34200D8B940 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C957D2882E22D34200D8B940 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C9F3F9E22E7DF3CB00A46DEB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C957D2842E22D34200D8B940 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C957D2742E22D34200D8B940 /* LongevityFoodLab */;
+			targetProxy = C957D2832E22D34200D8B940 /* PBXContainerItemProxy */;
+		};
+		C957D28E2E22D34200D8B940 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C957D2742E22D34200D8B940 /* LongevityFoodLab */;
+			targetProxy = C957D28D2E22D34200D8B940 /* PBXContainerItemProxy */;
+		};
+		C9F3F9EF2E7DF3CB00A46DEB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C9F3F9E52E7DF3CB00A46DEB /* LongevityFoodLabShareExtension */;
+			targetProxy = C9F3F9EE2E7DF3CB00A46DEB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		C957D2942E22D34200D8B940 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C957D2952E22D34200D8B940 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C957D2972E22D34200D8B940 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LongevityFoodLab/LongevityFoodLab.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H4R73LQP7A;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LongevityFoodLab/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Food Lab";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLab;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C957D2982E22D34200D8B940 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LongevityFoodLab/LongevityFoodLab.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H4R73LQP7A;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LongevityFoodLab/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Food Lab";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLab;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C957D29A2E22D34200D8B940 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLabTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LongevityFoodLab.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LongevityFoodLab";
+			};
+			name = Debug;
+		};
+		C957D29B2E22D34200D8B940 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLabTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LongevityFoodLab.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LongevityFoodLab";
+			};
+			name = Release;
+		};
+		C957D29D2E22D34200D8B940 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLabUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LongevityFoodLab;
+			};
+			name = Debug;
+		};
+		C957D29E2E22D34200D8B940 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLabUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LongevityFoodLab;
+			};
+			name = Release;
+		};
+		C9F3F9F22E7DF3CB00A46DEB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LongevityFoodLabShareExtension/LongevityFoodLabShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H4R73LQP7A;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LongevityFoodLabShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LongevityFoodLabShareExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLab.LongevityFoodLabShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_PRECOMPILE_BRIDGING_HEADER = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C9F3F9F32E7DF3CB00A46DEB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LongevityFoodLabShareExtension/LongevityFoodLabShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H4R73LQP7A;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LongevityFoodLabShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LongevityFoodLabShareExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ericbetuel.LongevityFoodLab.LongevityFoodLabShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_PRECOMPILE_BRIDGING_HEADER = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C957D2702E22D34200D8B940 /* Build configuration list for PBXProject "LongevityFoodLab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C957D2942E22D34200D8B940 /* Debug */,
+				C957D2952E22D34200D8B940 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C957D2962E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLab" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C957D2972E22D34200D8B940 /* Debug */,
+				C957D2982E22D34200D8B940 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C957D2992E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLabTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C957D29A2E22D34200D8B940 /* Debug */,
+				C957D29B2E22D34200D8B940 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C957D29C2E22D34200D8B940 /* Build configuration list for PBXNativeTarget "LongevityFoodLabUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C957D29D2E22D34200D8B940 /* Debug */,
+				C957D29E2E22D34200D8B940 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C9F3F9F12E7DF3CB00A46DEB /* Build configuration list for PBXNativeTarget "LongevityFoodLabShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C9F3F9F22E7DF3CB00A46DEB /* Debug */,
+				C9F3F9F32E7DF3CB00A46DEB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C957D26D2E22D34200D8B940 /* Project object */;
+}

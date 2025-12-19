@@ -1,0 +1,3078 @@
+import SwiftUI
+
+// MARK: - Lightweight VM to cache filtered/sorted recipes (local to this file)
+final class RecipesViewModel: ObservableObject {
+    @Published var displayed: [Recipe] = []
+    @Published var isLoaded = false
+    private var lastComputeKey: String = ""
+
+    func refresh(recipes: [Recipe], filter: FilterOption) {
+        // Recompute only when inputs change
+        // Include recipe IDs and ratings in hash to detect when recipe properties change
+        let recipeHash = recipes.map { "\($0.id.uuidString):\($0.rating)" }.joined()
+        let key = "\(recipes.count)|\(filter.rawValue)|\(recipeHash.hashValue)"
+        guard key != lastComputeKey else { return }
+        lastComputeKey = key
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let all = recipes.filter { !$0.isOriginal }
+            guard !all.isEmpty else {
+                DispatchQueue.main.async {
+                    self.displayed = []
+                    self.isLoaded = true
+                }
+                return
+            }
+
+            var out = all
+            switch filter {
+            case .allRecipes, .mostRecent:
+                out = out.sorted { $0.dateAdded > $1.dateAdded }
+            case .topRated:
+                out = out.filter { $0.rating > 0 }
+                out = out.sorted { $0.rating > $1.rating }
+            case .topIndexScores:
+                out = out.filter { $0.longevityScore != nil }
+                out = out.sorted { ($0.longevityScore ?? 0) > ($1.longevityScore ?? 0) }
+            }
+
+            DispatchQueue.main.async {
+                self.displayed = out
+                self.isLoaded = true
+            }
+        }
+    }
+}
+
+// MARK: - View Mode Enum
+enum ViewMode {
+    case list
+    case grid
+}
+
+// MARK: - Filter Option Enum
+enum FilterOption: String, CaseIterable {
+    case allRecipes = "All Recipes"
+    case mostRecent = "Most Recent"
+    case topRated = "Top Rated"
+    case topIndexScores = "Top Index Scores"
+}
+
+// MARK: - Recipe Sort Option Enum
+enum RecipeSortOption: String, CaseIterable {
+    case mostRecent = "Most Recent"
+    case name = "Name"
+    case rating = "Rating"
+    case indexScore = "Index Score"
+}
+
+struct RecipesView: View {
+    @StateObject private var recipeManager = RecipeManager.shared
+    @StateObject private var iCloudManager = iCloudRecipeManager.shared
+    @StateObject private var vm = RecipesViewModel()
+    @State private var showingRecipeSearch = false
+    @State private var showingRecipeImport = false
+    @State private var hasInitialized = false
+    @State private var selectedRecipe: Recipe? = nil
+    @State private var showingAllRecentRecipes = false
+    
+    // Grid/List view state
+    @State private var viewMode: ViewMode = .list
+    @State private var filterOption: FilterOption = .allRecipes
+    @State private var sortOption: RecipeSortOption = .mostRecent
+    @State private var isEditing = false
+    @State private var showingManualEntry = false
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Top Navigation Bar
+                topNavigationBar
+                
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Tiny stabilizer spacer (replaces removed buttons)
+                        Color.clear.frame(height: 8)
+                        
+                        // View Toggle + Filter Section
+                        viewToggleSection
+                        
+                        // Recipe Grid or List
+                        recipeContentSection
+                    }
+                }
+                
+                // Bottom Menu Bar
+                bottomMenuBar
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
+                .onAppear {
+                    if !hasInitialized {
+                        hasInitialized = true
+                        // Load recipes from RecipeManager
+                        Task {
+                            await recipeManager.loadRecipes()
+                            vm.refresh(recipes: recipeManager.recipes, filter: filterOption)
+                        }
+                    } else {
+                        vm.refresh(recipes: recipeManager.recipes, filter: filterOption)
+                    }
+                }
+                .onChange(of: recipeManager.recipes) { _, newRecipes in
+                    vm.refresh(recipes: newRecipes, filter: filterOption)
+                }
+                .onChange(of: filterOption) { _, newFilter in
+                    vm.refresh(recipes: recipeManager.recipes, filter: newFilter)
+                }
+        }
+        .sheet(isPresented: $showingRecipeSearch) {
+            RecipeSearchView()
+        }
+        .sheet(isPresented: $showingRecipeImport) {
+            RecipeImportSheet()
+        }
+        .sheet(isPresented: $showingManualEntry) {
+            ManualRecipeEntryView()
+        }
+        .sheet(item: $selectedRecipe) { recipe in
+            RecipeDetailView(recipe: recipe)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToRecipesTab)) { notification in
+            print("RecipesView: Received navigateToRecipesTab notification")
+            
+            // Find recipe by ID from recipeManager.recipes (ensures it matches the list)
+            if let recipeIDString = notification.userInfo?["importedRecipeID"] as? String,
+               let recipeID = UUID(uuidString: recipeIDString) {
+                print("RecipesView: Looking for recipe with ID: \(recipeIDString)")
+                
+                // Wait a bit for recipes to be loaded, then find the recipe from the list
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    Task {
+                        // Ensure recipes are loaded
+                        await recipeManager.loadRecipes()
+                        
+                        // Find the recipe from the list by ID
+                        if let savedRecipe = recipeManager.recipes.first(where: { $0.id == recipeID }) {
+                            await MainActor.run {
+                                selectedRecipe = savedRecipe
+                                print("RecipesView: selectedRecipe is now: \(savedRecipe.title)")
+                            }
+                        } else {
+                            print("RecipesView: Could not find recipe with ID: \(recipeIDString) in recipeManager.recipes")
+                            print("RecipesView: Available recipe IDs: \(recipeManager.recipes.map { $0.id.uuidString })")
+                        }
+                    }
+                }
+            }
+            // Fallback: support old format with recipe object
+            else if let recipe = notification.userInfo?["importedRecipe"] as? Recipe {
+                print("RecipesView: Fallback - using recipe object for: \(recipe.title)")
+                
+                // Wait and find from list by ID
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    Task {
+                        await recipeManager.loadRecipes()
+                        if let savedRecipe = recipeManager.recipes.first(where: { $0.id == recipe.id }) {
+                            await MainActor.run {
+                                selectedRecipe = savedRecipe
+                                print("RecipesView: selectedRecipe is now: \(savedRecipe.title)")
+                            }
+                        } else {
+                            print("RecipesView: Could not find recipe in list, using provided recipe")
+                            await MainActor.run {
+                                selectedRecipe = recipe
+                            }
+                        }
+                    }
+                }
+            } else {
+                print("RecipesView: No importedRecipe or importedRecipeID found in notification")
+            }
+        }
+    }
+    
+    // MARK: - Top Navigation Bar
+    private var topNavigationBar: some View {
+        HStack {
+            // Edit Button (left)
+            Button(action: {
+                isEditing.toggle()
+            }) {
+                Text("Edit")
+                    .font(.headline)
+                    .foregroundColor(.blue)
+            }
+            .padding(.leading, 20)
+            
+            Spacer()
+            
+            // Filter Dropdown (center) - styled like Edit button with blue text
+            Menu {
+                ForEach(FilterOption.allCases, id: \.self) { option in
+                    Button(action: {
+                        filterOption = option
+                    }) {
+                        HStack {
+                            Text(option.rawValue)
+                            if filterOption == option {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(filterOption.rawValue)
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                    
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            Spacer()
+            
+            // Plus Button (Manual Entry)
+            Button(action: {
+                showingManualEntry = true
+            }) {
+                Image(systemName: "plus")
+                    .font(.title3)
+                    .foregroundColor(.primary)
+            }
+            .padding(.trailing, 20)
+        }
+        .frame(height: 40)
+        .background(Color(.systemBackground))
+    }
+    
+    // MARK: - Action Buttons Section
+    private var actionButtonsSection: some View {
+                VStack(spacing: 12) {
+            // Import Recipe Button (on top)
+                    Button(action: {
+                showingRecipeImport = true
+                    }) {
+                        HStack {
+                    Image(systemName: "arrow.down.doc")
+                                .font(.title2)
+                            
+                    Text("Import Recipe")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(red: 0.42, green: 0.557, blue: 0.498))
+                        .cornerRadius(12)
+                    }
+                    
+            // Search Recipes Button (below)
+                    Button(action: {
+                showingRecipeSearch = true
+                    }) {
+                        HStack {
+                    Image(systemName: "magnifyingglass")
+                                .font(.title2)
+                            
+                    Text("Search Recipes")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(red: 0.42, green: 0.557, blue: 0.498))
+                        .cornerRadius(12)
+                    }
+                }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+                .padding(.bottom, 20)
+    }
+                    
+    // MARK: - View Toggle Section
+    private var viewToggleSection: some View {
+        HStack {
+            // List Icon (flush left)
+            Button(action: {
+                viewMode = .list
+            }) {
+                Image(systemName: "list.bullet")
+                    .font(.title3)
+                    .foregroundColor(viewMode == .list ? Color(red: 0.42, green: 0.557, blue: 0.498) : .secondary)
+            }
+            .padding(.leading, 20)
+            
+            Spacer()
+            
+            // Logo Image (center)
+            Image("Logo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 32)
+            
+            Spacer()
+            
+            // Grid Icon (flush right)
+            Button(action: {
+                viewMode = .grid
+            }) {
+                Image(systemName: "square.grid.3x3")
+                    .font(.title3)
+                    .foregroundColor(viewMode == .grid ? Color(red: 0.42, green: 0.557, blue: 0.498) : .secondary)
+            }
+            .padding(.trailing, 20)
+        }
+        .padding(.top, 5)  // 5pt padding above icons
+        .padding(.bottom, 5)  // 5pt padding below icons
+    }
+    
+    // MARK: - Recipe Content Section
+    private var recipeContentSection: some View {
+        Group {
+            if !vm.isLoaded {
+                AnyView(ProgressView().padding(.top, 24))
+            } else if vm.displayed.isEmpty {
+                AnyView(
+                    VStack(spacing: 20) {
+                        Image(systemName: "book.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.secondary)
+                        
+                        Text("No Recipes")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        
+                        Text("Import or create a recipe to get started.")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    .padding(.vertical, 40)
+                )
+            } else if viewMode == .grid {
+                AnyView(recipeGridView(recipes: vm.displayed))
+            } else {
+                AnyView(recipeListView(recipes: vm.displayed))
+            }
+        }
+    }
+    
+    // MARK: - Recipe Grid View
+    private func recipeGridView(recipes: [Recipe]) -> some View {
+        let columns = [
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8)
+        ]
+        
+        return LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(recipes, id: \.id) { recipe in
+                RecipeGridCard(recipe: recipe, isEditing: isEditing) {
+                    selectedRecipe = recipe
+                } onDelete: { recipeToDelete in
+                        Task {
+                        try? await recipeManager.deleteRecipe(recipeToDelete)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)  // 6pt padding from view toggle
+        .padding(.bottom, 12)  // 12pt padding before bottom bar
+    }
+    
+    // MARK: - Recipe List View
+    private func recipeListView(recipes: [Recipe]) -> some View {
+        return LazyVStack(spacing: 12) {
+            ForEach(recipes, id: \.id) { recipe in
+                RecipeRowView(recipe: recipe, onTap: { selectedRecipe in
+                    self.selectedRecipe = selectedRecipe
+                }, onDelete: { recipeToDelete in
+                    Task {
+                        try? await recipeManager.deleteRecipe(recipeToDelete)
+                    }
+                })
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)  // 6pt padding from view toggle
+        .padding(.bottom, 12)  // 12pt padding before bottom bar
+    }
+    
+    // MARK: - Bottom Menu Bar
+    private var bottomMenuBar: some View {
+        HStack(spacing: 20) {
+            // Search Recipes Button (left)
+            Button(action: {
+                showingRecipeSearch = true
+            }) {
+                Text("Search Recipes")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+            
+            Spacer()
+            
+            // Import Recipe Button (right)
+            Button(action: {
+                showingRecipeImport = true
+            }) {
+                Text("Import Recipe")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+        }
+        .frame(height: 50)
+        .padding(.horizontal, 20)
+        .background(Color(.systemBackground))
+        .overlay(
+            Rectangle()
+                .frame(height: 0.5)
+                .foregroundColor(Color(.separator)),
+            alignment: .top
+        )
+    }
+    
+    // MARK: - Helper Functions
+    private func getFilteredAndSortedRecipes() -> [Recipe] {
+        var recipes = recipeManager.recipes.filter { !$0.isOriginal }
+        
+        // Apply filter and sort based on filterOption
+        switch filterOption {
+        case .allRecipes:
+            // Show all recipes, sorted by most recent (default)
+            recipes = recipes.sorted { $0.dateAdded > $1.dateAdded }
+        case .mostRecent:
+            recipes = recipes.sorted { $0.dateAdded > $1.dateAdded }
+        case .topRated:
+            recipes = recipes.filter { $0.rating > 0 }
+            recipes = recipes.sorted { $0.rating > $1.rating }
+        case .topIndexScores:
+            recipes = recipes.filter { $0.longevityScore != nil }
+            recipes = recipes.sorted { ($0.longevityScore ?? 0) > ($1.longevityScore ?? 0) }
+        }
+        
+        return recipes
+    }
+    
+    // MARK: - Recently Imported Section (Legacy - keeping for now)
+    private var recentlyImportedSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Recently Imported")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            
+            let importedRecipes = recipeManager.recipes.filter { !$0.isOriginal }
+            
+            if importedRecipes.isEmpty {
+                Text("No imported recipes yet")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                let displayCount = showingAllRecentRecipes ? importedRecipes.count : min(6, importedRecipes.count)
+                let recipesToShow = Array(importedRecipes.sorted { $0.dateAdded > $1.dateAdded }.prefix(displayCount))
+                
+                LazyVStack(spacing: 12) {
+                    ForEach(recipesToShow, id: \.id) { recipe in
+                        RecipeRowView(recipe: recipe, onTap: { selectedRecipe in
+                            self.selectedRecipe = selectedRecipe
+                        }, onDelete: { recipeToDelete in
+                            Task {
+                                try await recipeManager.deleteRecipe(recipeToDelete)
+                            }
+                        })
+                    }
+                }
+                
+                // View More/Show Less Button
+                if importedRecipes.count > 6 {
+                    Button(action: {
+                        showingAllRecentRecipes.toggle()
+                    }) {
+                        Text(showingAllRecentRecipes ? "Show Less" : "View More")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(Color(red: 0.42, green: 0.557, blue: 0.498))
+                            .cornerRadius(8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 150) // Add more bottom padding to account for tab bar
+    }
+}
+
+struct RecipeCard: View {
+    let recipe: Recipe
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recipe.title)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    if !recipe.description.isEmpty {
+                        Text(recipe.description)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let score = recipe.longevityScore {
+                        Text("\(score)")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .frame(width: 40, height: 40)
+                            .background(scoreColor(score))
+                            .clipShape(Circle())
+                    }
+                    
+                    if recipe.rating > 0 {
+                        HStack(spacing: 2) {
+                            ForEach(0..<5) { index in
+                                Image(systemName: index < Int(recipe.rating) ? "star.fill" : "star")
+                                    .foregroundColor(.yellow)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            HStack {
+                // Only show prep time if valid (1-600 minutes)
+                if recipe.prepTime > 0 && recipe.prepTime <= 600 {
+                    Label("\(recipe.prepTimeFormatted)", systemImage: "clock")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                if recipe.cookTime > 0 {
+                    Label("\(recipe.cookTimeFormatted)", systemImage: "flame")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Only show servings if valid (2-50)
+                if recipe.servings >= 2 && recipe.servings <= 50 {
+                    // Calculate scaled servings
+                    let scaledServings = Int(round(Double(recipe.servings) * recipe.scaleFactor))
+                    let servingsText = recipe.scaleFactor != 1.0 
+                        ? "\(scaledServings) serving\(scaledServings == 1 ? "" : "s") (Scaled)"
+                        : "\(recipe.servings) serving\(recipe.servings == 1 ? "" : "s")"
+                    
+                    Label(servingsText, systemImage: "person.2")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                if recipe.isFavorite {
+                    Image(systemName: "heart.fill")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+            }
+            
+            if !recipe.categories.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(recipe.categories) { category in
+                            Text(category.emoji + " " + category.displayName)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(8)
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+            }
+        }
+        .padding()
+        .background(Color(UIColor.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 80...100: return Color.green
+        case 60..<80: return Color.orange
+        default: return Color.red
+        }
+    }
+}
+
+// Enum for recipe scale fractions (like timer picker)
+enum RecipeScaleFraction: Double, CaseIterable {
+    case none = 0.0
+    case quarter = 0.25
+    case third = 0.3333333333
+    case half = 0.5
+    case twoThirds = 0.6666666667
+    case threeQuarters = 0.75
+    
+    var displayName: String {
+        switch self {
+        case .none: return ""
+        case .quarter: return "1/4"
+        case .third: return "1/3"
+        case .half: return "1/2"
+        case .twoThirds: return "2/3"
+        case .threeQuarters: return "3/4"
+        }
+    }
+}
+
+struct RecipeDetailView: View {
+    let recipe: Recipe
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var recipeManager = RecipeManager.shared
+    
+    // Mutable recipe state for editing
+    @State private var currentRecipe: Recipe
+    
+    // Scale factor state (like timer picker: whole numbers + fractions)
+    @State private var selectedWholeNumber: Int = 1
+    @State private var selectedFraction: RecipeScaleFraction = .none
+    
+    // Track original scale factor to detect changes
+    @State private var originalScaleFactor: Double = 1.0
+    
+    // Modal state
+    @State private var showingScaleConvertModal = false
+    @State private var showingAnalysisView = false
+    @State private var isAnalyzing = false
+    @State private var cachedAnalysis: FoodAnalysis? = nil
+    
+    // Unit system state
+    @State private var currentUnitSystem: UnitSystem = .us
+    
+    // Category picker state
+    @State private var showingCustomCategorySheet = false
+    @State private var newCustomCategory = ""
+    
+    // Local state for pickers (for immediate UI updates)
+    @State private var currentRating: Int = 0
+    @State private var currentCategories: [RecipeCategory] = []
+    @State private var currentCustomCategories: [String] = []
+    
+    // Initialize with recipe
+    init(recipe: Recipe) {
+        self.recipe = recipe
+        _currentRecipe = State(initialValue: recipe)
+    }
+    
+    // Helper function to extract domain from URL
+    private func extractDomain(from urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              let host = url.host else {
+            return urlString
+        }
+        
+        // Remove 'www.' prefix if present
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return domain
+    }
+    
+    // Computed property for scale factor
+    private var scaleFactor: Double {
+        let fractionValue: Double = selectedFraction.rawValue
+        return Double(selectedWholeNumber) + fractionValue
+    }
+    
+    // Check if scale factor has been modified
+    private var hasScaleChanged: Bool {
+        abs(scaleFactor - originalScaleFactor) > 0.001
+    }
+    
+    // Helper to convert scale factor to whole number and fraction
+    private func scaleFactorToPickerValues(_ factor: Double) -> (whole: Int, fraction: RecipeScaleFraction) {
+        let whole = Int(factor)
+        let decimal = factor - Double(whole)
+        
+        // Find closest fraction
+        let tolerance = 0.001
+        let commonDenominators: [(Double, RecipeScaleFraction)] = [
+            (0.0, .none),
+            (0.25, .quarter),
+            (0.3333333333, .third),
+            (0.5, .half),
+            (0.6666666667, .twoThirds),
+            (0.75, .threeQuarters)
+        ]
+        
+        for (value, fraction) in commonDenominators {
+            if abs(decimal - value) < tolerance {
+                return (whole, fraction)
+            }
+        }
+        
+        return (whole, .none)
+    }
+    
+    // Get latest recipe from RecipeManager
+    private var latestRecipe: Recipe {
+        recipeManager.recipes.first(where: { $0.id == recipe.id }) ?? currentRecipe
+    }
+    
+    // Save recipe changes
+    private func saveRecipeChanges() {
+        Task {
+            do {
+                var updatedRecipe = currentRecipe
+                updatedRecipe.unitSystem = currentUnitSystem
+                try await recipeManager.saveRecipe(updatedRecipe)
+                currentRecipe = updatedRecipe
+                print("RecipeDetailView: Saved rating/category/unit changes")
+            } catch {
+                print("RecipeDetailView: Failed to save recipe changes: \(error)")
+            }
+        }
+    }
+    
+    // Handle score circle tap
+    private func handleScoreCircleTap() {
+        let currentRecipe = latestRecipe
+        
+        // If we have cached analysis, show it immediately
+        if let cached = cachedAnalysis {
+            DispatchQueue.main.async {
+                self.showingAnalysisView = true
+            }
+            return
+        }
+        
+        // If recipe has saved analysis but no cached analysis, reconstruct from saved data
+        // Don't make a new API call - use the cached analysis data
+        if let score = currentRecipe.longevityScore, let report = currentRecipe.analysisReport {
+            // Try to decode full analysis from saved JSON data first
+            if let analysis = reconstructAnalysisFromSavedData(recipe: currentRecipe) {
+                DispatchQueue.main.async {
+                    self.cachedAnalysis = analysis
+                    self.showingAnalysisView = true
+                }
+                return
+            }
+            // Fallback: reconstruct minimal analysis from score and summary
+            let reconstructedAnalysis = reconstructAnalysisFromSavedDataFallback(recipe: currentRecipe, score: score, summary: report)
+            DispatchQueue.main.async {
+                self.cachedAnalysis = reconstructedAnalysis
+                self.showingAnalysisView = true
+            }
+            return
+        }
+        
+        // Recipe doesn't have analysis yet, start new analysis
+        startRecipeAnalysis()
+    }
+    
+    // Reconstruct FoodAnalysis from saved recipe data (without making API call)
+    // First tries to decode full analysis from JSON, falls back to minimal reconstruction
+    private func reconstructAnalysisFromSavedData(recipe: Recipe) -> FoodAnalysis? {
+        // Try to decode full analysis from saved JSON data
+        if let jsonData = recipe.fullAnalysisData,
+           let data = jsonData.data(using: .utf8) {
+            do {
+                let analysis = try JSONDecoder().decode(FoodAnalysis.self, from: data)
+                return analysis
+            } catch {
+                print("RecipeDetailView: Failed to decode full analysis data: \(error)")
+            }
+        }
+        return nil
+    }
+    
+    // Fallback: Reconstruct minimal FoodAnalysis from score and summary only
+    private func reconstructAnalysisFromSavedDataFallback(recipe: Recipe, score: Int, summary: String) -> FoodAnalysis {
+        // Create minimal FoodAnalysis from saved data
+        // Use default/placeholder values for fields we don't have saved
+        let defaultHealthScores = HealthScores(
+            heartHealth: score,
+            brainHealth: score,
+            antiInflammation: score,
+            jointHealth: score,
+            eyeHealth: score,
+            weightManagement: score,
+            bloodSugar: score,
+            energy: score,
+            immune: score,
+            sleep: score,
+            skin: score,
+            stress: score
+        )
+        
+        // Extract key benefits from summary if possible, otherwise use placeholder
+        let keyBenefits = extractKeyBenefitsFromSummary(summary)
+        
+        // Create placeholder ingredients list from recipe ingredients if available
+        let ingredients = createIngredientsFromRecipe(recipe)
+        
+        // Create default nutrition info
+        let nutritionInfo = NutritionInfo(
+            calories: "N/A",
+            protein: "N/A",
+            carbohydrates: "N/A",
+            fat: "N/A",
+            sugar: "N/A",
+            fiber: "N/A",
+            sodium: "N/A"
+        )
+        
+        return FoodAnalysis(
+            foodName: recipe.title,
+            overallScore: score,
+            summary: summary,
+            healthScores: defaultHealthScores,
+            keyBenefits: keyBenefits,
+            ingredients: ingredients,
+            bestPreparation: "Analysis details not available. Full analysis requires re-analyzing the recipe.",
+            servingSize: recipe.servings > 0 ? "\(recipe.servings) servings" : "N/A",
+            nutritionInfo: nutritionInfo
+        )
+    }
+    
+    // Extract key benefits from summary text
+    private func extractKeyBenefitsFromSummary(_ summary: String) -> [String] {
+        // Ensure summary is not empty
+        guard !summary.isEmpty else {
+            return ["Analysis summary not available"]
+        }
+        
+        // Try to extract benefits from summary - look for common patterns
+        var benefits: [String] = []
+        
+        // Split by sentences and look for benefit-like statements
+        let sentences = summary.components(separatedBy: ". ")
+        for sentence in sentences {
+            let trimmed = sentence.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty && trimmed.count > 20 && trimmed.count < 200 {
+                // Remove trailing period if present
+                let benefit = trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+                if !benefit.isEmpty {
+                    benefits.append(benefit)
+                    if benefits.count >= 5 { // Limit to 5 benefits
+                        break
+                    }
+                }
+            }
+        }
+        
+        // If we couldn't extract benefits, use summary as single benefit
+        if benefits.isEmpty {
+            benefits = [summary]
+        }
+        
+        return benefits
+    }
+    
+    // Create FoodIngredient list from recipe ingredients
+    private func createIngredientsFromRecipe(_ recipe: Recipe) -> [FoodIngredient] {
+        var ingredients: [FoodIngredient] = []
+        
+        // Try to parse recipe ingredients text
+        if let ingredientsText = recipe.ingredientsText {
+            let lines = ingredientsText.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            
+            for line in lines.prefix(10) { // Limit to 10 ingredients
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    // Extract ingredient name (everything after quantity/unit)
+                    let parts = trimmed.components(separatedBy: " ")
+                    if parts.count >= 2 {
+                        // Assume last 2-3 words are the ingredient name
+                        let nameWords = Array(parts.suffix(min(3, parts.count)))
+                        let name = nameWords.joined(separator: " ")
+                        
+                        ingredients.append(FoodIngredient(
+                            name: name,
+                            impact: "neutral", // Default to neutral since we don't have analysis
+                            explanation: "Ingredient analysis not available from cached data."
+                        ))
+                    }
+                }
+            }
+        }
+        
+        // If we couldn't extract ingredients, create placeholder
+        if ingredients.isEmpty {
+            ingredients = [FoodIngredient(
+                name: "Ingredient details not available",
+                impact: "neutral",
+                explanation: "Full ingredient analysis requires re-analyzing the recipe."
+            )]
+        }
+        
+        return ingredients
+    }
+    
+    // Check analysis status
+    private func checkAnalysisStatus() {
+        let currentRecipe = latestRecipe
+        
+        // If recipe already has a score, don't trigger anything
+        // The score circle will display the saved score
+        // User can tap the circle to view full analysis if needed
+        if currentRecipe.longevityScore != nil {
+            // Recipe has analysis saved - no need to fetch or create
+            // Just return - the score circle will show the saved score
+            return
+        }
+        
+        // Recipe doesn't have a score yet - but don't auto-trigger analysis
+        // Wait for user to tap the circle to start analysis
+    }
+    
+    // Fetch or create analysis from recipe
+    private func fetchOrCreateAnalysis() {
+        let currentRecipe = latestRecipe
+        
+        // If we have cached analysis, use it
+        if let cached = cachedAnalysis {
+            showingAnalysisView = true
+            return
+        }
+        
+        // If recipe already has saved analysis (score and report), don't trigger new API call
+        // The score circle will show the saved score
+        if currentRecipe.longevityScore != nil && currentRecipe.analysisReport != nil {
+            // Recipe has analysis but we don't have cachedAnalysis
+            // Don't trigger a new API call - just return
+            // User can tap the circle to view full analysis, which would require fetching
+            // but for now, we'll prevent unnecessary API calls
+            return
+        }
+        
+        // Recipe doesn't have analysis yet - start new analysis
+        startRecipeAnalysis()
+    }
+    
+    // Start recipe analysis
+    private func startRecipeAnalysis() {
+        guard !isAnalyzing else { return }
+        
+        isAnalyzing = true
+        
+        AIService.shared.analyzeRecipe(currentRecipe) { [self] result in
+            DispatchQueue.main.async {
+                isAnalyzing = false
+                
+                switch result {
+                case .success(let analysis):
+                    cachedAnalysis = analysis
+                    
+                    // Update recipe with analysis results (including full analysis JSON)
+                    Task {
+                        var updatedRecipe = currentRecipe
+                        updatedRecipe.longevityScore = analysis.overallScore
+                        updatedRecipe.analysisReport = analysis.summary
+                        updatedRecipe.analysisType = .full
+                        
+                        // Encode full FoodAnalysis as JSON and save
+                        if let jsonData = try? JSONEncoder().encode(analysis),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+                            updatedRecipe.fullAnalysisData = jsonString
+                        }
+                        
+                        do {
+                            try await recipeManager.saveRecipe(updatedRecipe)
+                            currentRecipe = updatedRecipe
+                            print("RecipeDetailView: Saved analysis results with full analysis data")
+                        } catch {
+                            print("RecipeDetailView: Failed to save analysis: \(error)")
+                        }
+                    }
+                    
+                    // Show analysis view
+                    showingAnalysisView = true
+                    
+                case .failure(let error):
+                    print("RecipeDetailView: Analysis failed: \(error)")
+                    // Fail silently - user can tap again to retry
+                }
+            }
+        }
+    }
+    
+    // Save scale factor to recipe
+    private func saveScaleFactor() {
+        Task {
+            // Find the recipe in the manager's recipes array
+            if let index = recipeManager.recipes.firstIndex(where: { $0.id == recipe.id }) {
+                var updatedRecipe = recipeManager.recipes[index]
+                updatedRecipe.scaleFactor = scaleFactor
+                try? await recipeManager.saveRecipe(updatedRecipe)
+                
+                // Update original scale factor after saving
+                await MainActor.run {
+                    originalScaleFactor = scaleFactor
+                }
+            } else {
+                // Fallback: create updated recipe from current recipe
+                var updatedRecipe = recipe
+                updatedRecipe.scaleFactor = scaleFactor
+                try? await recipeManager.saveRecipe(updatedRecipe)
+                
+                // Update original scale factor after saving
+                await MainActor.run {
+                    originalScaleFactor = scaleFactor
+                }
+            }
+        }
+    }
+    
+    // Function to scale ingredients
+    private func scaleIngredients(_ ingredientsText: String, by factor: Double) -> String {
+        let lines = ingredientsText.components(separatedBy: "\n")
+        let scaledLines = lines.map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { return line }
+            
+            // If scaling factor is 1.0, still check and fix pluralization for existing ingredients
+            if factor == 1.0 {
+                // Fix pluralization for ingredients that already have quantities but wrong pluralization
+                if let fixed = fixPluralization(trimmed) {
+                    return fixed
+                }
+                return line
+            }
+            
+            // Try to parse and scale the quantity at the start of the line
+            if let scaled = scaleIngredientLine(trimmed, by: factor) {
+                return scaled
+            }
+            
+            // Handle text-only ingredients (e.g., "Cup" -> "2 cups")
+            if let scaled = scaleTextOnlyIngredient(trimmed, by: factor) {
+                return scaled
+            }
+            
+            return line
+        }
+        
+        return scaledLines.joined(separator: "\n")
+    }
+    
+    // Fix pluralization for ingredients that already have quantities but wrong pluralization
+    // Example: "3 cup" -> "3 cups", "3 tablespoon" -> "3 tablespoons", "2/8 teaspoon" -> "1/4 teaspoons"
+    private func fixPluralization(_ line: String) -> String? {
+        // Pattern to match: number + unit (singular) + ingredient
+        // Examples: "3 cup flour", "2 tablespoon salt", "2/8 teaspoon pepper"
+        let pattern = #"^(\d+(?:\s+\d+/\d+)?|\d+/\d+)\s+([a-z]+)\s+(.+)$"#
+        
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else {
+            return nil
+        }
+        
+        // Extract quantity string
+        guard let quantityRange = Range(match.range(at: 1), in: line) else { return nil }
+        var quantityString = String(line[quantityRange])
+        
+        // Extract unit
+        guard let unitRange = Range(match.range(at: 2), in: line) else { return nil }
+        let unit = String(line[unitRange]).trimmingCharacters(in: .whitespaces)
+        
+        // Extract ingredient
+        guard let ingRange = Range(match.range(at: 3), in: line) else { return nil }
+        let ingredient = String(line[ingRange]).trimmingCharacters(in: .whitespaces)
+        
+        // Parse quantity to get numeric value and simplify fractions
+        var quantity: Double = 0
+        var wholeNumber: Int = 0
+        var fractionNum: Int = 0
+        var fractionDen: Int = 1
+        
+        if let num = Double(quantityString) {
+            quantity = num
+            wholeNumber = Int(quantity)
+        } else if quantityString.contains("/") && !quantityString.contains(" ") {
+            // Just a fraction like "2/8"
+            let parts = quantityString.split(separator: "/")
+            if parts.count == 2, let num = Int(parts[0]), let den = Int(parts[1]), den != 0 {
+                // Simplify the fraction
+                let simplified = simplifyFraction(num, den)
+                fractionNum = simplified.0
+                fractionDen = simplified.1
+                quantity = Double(fractionNum) / Double(fractionDen)
+                // Update quantityString with simplified fraction
+                quantityString = "\(fractionNum)/\(fractionDen)"
+            }
+        } else if quantityString.contains(" ") {
+            // Mixed number like "1 1/2" or "2 2/3"
+            let parts = quantityString.split(separator: " ")
+            if parts.count == 2, let whole = Int(parts[0]) {
+                wholeNumber = whole
+                let fracParts = parts[1].split(separator: "/")
+                if fracParts.count == 2, let num = Int(fracParts[0]), let den = Int(fracParts[1]), den != 0 {
+                    // Simplify the fraction
+                    let simplified = simplifyFraction(num, den)
+                    fractionNum = simplified.0
+                    fractionDen = simplified.1
+                    quantity = Double(whole) + (Double(fractionNum) / Double(fractionDen))
+                    // Update quantityString with simplified fraction
+                    if fractionNum == 0 {
+                        quantityString = "\(whole)"
+                    } else {
+                        quantityString = "\(whole) \(fractionNum)/\(fractionDen)"
+                    }
+                }
+            }
+        }
+        
+        // If quantity is not exactly 1.0, pluralize the unit
+        let isSingular = abs(quantity - 1.0) < 0.001
+        if !isSingular && quantity > 0 {
+            let pluralizedUnit = pluralizeUnit(unit, quantity: quantity)
+            // Always fix if quantity != 1.0 - pluralize the unit
+            return "\(quantityString) \(pluralizedUnit) \(ingredient)"
+        }
+        
+        return nil
+    }
+    
+    // Handle text-only ingredients (e.g., "Cup", "teaspoon", etc.)
+    private func scaleTextOnlyIngredient(_ line: String, by factor: Double) -> String? {
+        // Check if line starts with a unit word (common cooking units) without a number
+        let unitWords = ["cup", "cups", "teaspoon", "teaspoons", "tablespoon", "tablespoons", 
+                        "ounce", "ounces", "pound", "pounds", "gram", "grams", "kilogram", "kilograms",
+                        "liter", "liters", "quart", "quarts", "pint", "pints", "gallon", "gallons",
+                        "milliliter", "milliliters", "pinch", "pinches", "dash", "dashes",
+                        "can", "cans", "package", "packages", "bunch", "bunches",
+                        "bag", "bags", "bottle", "bottles", "box", "boxes", "jar", "jars",
+                        "head", "heads", "clove", "cloves", "stalk", "stalks", "sprig", "sprigs", "strip", "strips"]
+        
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let lowercased = trimmed.lowercased()
+        
+        // Check if line starts with a unit word (no number before it)
+        for unit in unitWords {
+            if lowercased.hasPrefix(unit) {
+                // Found a unit word at the start, add the scale factor
+                let scaledQuantity = formatScaledQuantity(factor)
+                // Get the rest of the line after the unit
+                let restOfLine = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: unit.count)...])
+                    .trimmingCharacters(in: .whitespaces)
+                
+                // Pluralize the unit based on the scaled quantity
+                let pluralizedUnit = pluralizeUnit(unit, quantity: factor)
+                
+                if restOfLine.isEmpty {
+                    return "\(scaledQuantity) \(pluralizedUnit)"
+                } else {
+                    return "\(scaledQuantity) \(pluralizedUnit) \(restOfLine)"
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // Helper to pluralize units correctly
+    private func pluralizeUnit(_ unit: String, quantity: Double) -> String {
+        // Normalize the unit to handle both singular and plural forms
+        let normalizedUnit = unit.lowercased().trimmingCharacters(in: .whitespaces)
+        
+        // Pluralize if quantity is NOT exactly 1.0
+        // Only singular if quantity is exactly 1.0
+        let isSingular = abs(quantity - 1.0) < 0.001
+        
+        // Debug: Check if unit is in our map
+        // Map both singular and plural forms to their correct form based on quantity
+        let unitMap: [String: (singular: String, plural: String)] = [
+            "cup": ("cup", "cups"),
+            "cups": ("cup", "cups"),
+            "teaspoon": ("teaspoon", "teaspoons"),
+            "teaspoons": ("teaspoon", "teaspoons"),
+            "tablespoon": ("tablespoon", "tablespoons"),
+            "tablespoons": ("tablespoon", "tablespoons"),
+            "ounce": ("ounce", "ounces"),
+            "ounces": ("ounce", "ounces"),
+            "pound": ("pound", "pounds"),
+            "pounds": ("pound", "pounds"),
+            "gram": ("gram", "grams"),
+            "grams": ("gram", "grams"),
+            "kilogram": ("kilogram", "kilograms"),
+            "kilograms": ("kilogram", "kilograms"),
+            "liter": ("liter", "liters"),
+            "liters": ("liter", "liters"),
+            "quart": ("quart", "quarts"),
+            "quarts": ("quart", "quarts"),
+            "pint": ("pint", "pints"),
+            "pints": ("pint", "pints"),
+            "gallon": ("gallon", "gallons"),
+            "gallons": ("gallon", "gallons"),
+            "milliliter": ("milliliter", "milliliters"),
+            "milliliters": ("milliliter", "milliliters"),
+            "pinch": ("pinch", "pinches"),
+            "pinches": ("pinch", "pinches"),
+            "dash": ("dash", "dashes"),
+            "dashes": ("dash", "dashes"),
+            "can": ("can", "cans"),
+            "cans": ("can", "cans"),
+            "package": ("package", "packages"),
+            "packages": ("package", "packages"),
+            "bunch": ("bunch", "bunches"),
+            "bunches": ("bunch", "bunches"),
+            "bag": ("bag", "bags"),
+            "bags": ("bag", "bags"),
+            "bottle": ("bottle", "bottles"),
+            "bottles": ("bottle", "bottles"),
+            "box": ("box", "boxes"),
+            "boxes": ("box", "boxes"),
+            "jar": ("jar", "jars"),
+            "jars": ("jar", "jars"),
+            "head": ("head", "heads"),
+            "heads": ("head", "heads"),
+            "clove": ("clove", "cloves"),
+            "cloves": ("clove", "cloves"),
+            "stalk": ("stalk", "stalks"),
+            "stalks": ("stalk", "stalks"),
+            "sprig": ("sprig", "sprigs"),
+            "sprigs": ("sprig", "sprigs"),
+            "strip": ("strip", "strips"),
+            "strips": ("strip", "strips")
+        ]
+        
+        if let forms = unitMap[normalizedUnit] {
+            return isSingular ? forms.singular : forms.plural
+        }
+        
+        // Fallback: return original unit if not in map
+        return unit
+    }
+    
+    // Helper to scale a single ingredient line
+    private func scaleIngredientLine(_ line: String, by factor: Double) -> String? {
+        // More flexible pattern to match:
+        // - Optional whole number
+        // - Optional fraction (with space before if there's a whole number)
+        // - Optional unit (word(s))
+        // - Rest is ingredient name
+        // Examples: "2 cups flour", "1 1/2 teaspoons salt", "1/4 cup milk", "2 eggs", "pinch of salt"
+        
+        // Try to match: (number)? (fraction)? (unit)? (ingredient)
+        // Note: Unit group is optional and can be one or two words, ingredient group is required
+        let pattern = #"^(\d+)?\s*(\d+/\d+)?\s*([a-z]+(?:\s+[a-z]+)?)?\s*(.+)$"#
+        
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else {
+            // If no quantity pattern found, check if it starts with a number or fraction
+            // If it does, try simpler parsing
+            if line.range(of: #"^\d+"#, options: .regularExpression) != nil ||
+               line.range(of: #"^\d+/\d+"#, options: .regularExpression) != nil {
+                // Has a number but regex didn't match - try simpler approach
+                return scaleSimpleIngredientLine(line, by: factor)
+            }
+            return nil
+        }
+        
+        var wholeNumber: Double = 0
+        var fraction: Double = 0
+        var unit: String = ""
+        var ingredient: String = ""
+        
+        // Extract whole number
+        if let wholeRange = Range(match.range(at: 1), in: line), !wholeRange.isEmpty {
+            wholeNumber = Double(line[wholeRange]) ?? 0
+        }
+        
+        // Extract fraction
+        if let fracRange = Range(match.range(at: 2), in: line), !fracRange.isEmpty {
+            let fracString = String(line[fracRange])
+            let parts = fracString.split(separator: "/")
+            if parts.count == 2, let num = Double(parts[0]), let den = Double(parts[1]), den != 0 {
+                fraction = num / den
+            }
+        }
+        
+        // Extract unit
+        if let unitRange = Range(match.range(at: 3), in: line), !unitRange.isEmpty {
+            unit = String(line[unitRange]).trimmingCharacters(in: .whitespaces)
+        }
+        
+        // Extract ingredient name
+        if let ingRange = Range(match.range(at: 4), in: line), !ingRange.isEmpty {
+            ingredient = String(line[ingRange]).trimmingCharacters(in: .whitespaces)
+        }
+        
+        // If no quantity found, return original
+        if wholeNumber == 0 && fraction == 0 {
+            return nil
+        }
+        
+        // Calculate total quantity
+        let totalQuantity = (wholeNumber + fraction) * factor
+        
+        // Format the scaled quantity
+        let formattedQuantity = formatScaledQuantity(totalQuantity)
+        
+        // Reconstruct the line with proper pluralization
+        var result = formattedQuantity
+        if !unit.isEmpty {
+            // Pluralize the unit based on the scaled quantity
+            // IMPORTANT: Always pluralize if quantity is not exactly 1.0
+            let pluralizedUnit = pluralizeUnit(unit, quantity: totalQuantity)
+            result += " \(pluralizedUnit)"
+        }
+        if !ingredient.isEmpty {
+            result += " \(ingredient)"
+        }
+        
+        return result
+    }
+    
+    // Simpler scaling for lines that don't match the main pattern
+    private func scaleSimpleIngredientLine(_ line: String, by factor: Double) -> String? {
+        // Try to extract just the leading number/fraction
+        let pattern = #"^(\d+(?:\s+\d+/\d+)?|\d+/\d+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let quantityRange = Range(match.range, in: line) else {
+            return nil
+        }
+        
+        let quantityString = String(line[quantityRange])
+        let restOfLine = String(line[quantityRange.upperBound...])
+            .trimmingCharacters(in: .whitespaces)
+        
+        // Parse the quantity
+        var quantity: Double = 0
+        
+        // Check for mixed number (e.g., "1 1/2")
+        if let spaceIndex = quantityString.firstIndex(of: " ") {
+            let wholePart = String(quantityString[..<spaceIndex])
+            let fractionPart = String(quantityString[quantityString.index(after: spaceIndex)...])
+            
+            if let whole = Double(wholePart) {
+                quantity += whole
+            }
+            
+            let fracParts = fractionPart.split(separator: "/")
+            if fracParts.count == 2, let num = Double(fracParts[0]), let den = Double(fracParts[1]), den != 0 {
+                quantity += num / den
+            }
+        } else if quantityString.contains("/") {
+            // Just a fraction
+            let fracParts = quantityString.split(separator: "/")
+            if fracParts.count == 2, let num = Double(fracParts[0]), let den = Double(fracParts[1]), den != 0 {
+                quantity = num / den
+            }
+        } else if let num = Double(quantityString) {
+            // Just a whole number
+            quantity = num
+        }
+        
+        if quantity == 0 {
+            return nil
+        }
+        
+        // Scale and format
+        let scaledQuantity = quantity * factor
+        let formattedQuantity = formatScaledQuantity(scaledQuantity)
+        
+        // Check if restOfLine starts with a unit and pluralize it
+        let trimmedRest = restOfLine.trimmingCharacters(in: .whitespaces)
+        if !trimmedRest.isEmpty {
+            // Try to extract unit from the rest of the line
+            let words = trimmedRest.components(separatedBy: .whitespaces)
+            if let firstWord = words.first?.lowercased() {
+                let unitWords = ["cup", "cups", "teaspoon", "teaspoons", "tablespoon", "tablespoons",
+                                "ounce", "ounces", "pound", "pounds", "gram", "grams", "kilogram", "kilograms",
+                                "liter", "liters", "quart", "quarts", "pint", "pints", "gallon", "gallons",
+                                "milliliter", "milliliters", "pinch", "pinches", "dash", "dashes",
+                                "can", "cans", "package", "packages", "bunch", "bunches",
+                                "bag", "bags", "bottle", "bottles", "box", "boxes", "jar", "jars",
+                                "head", "heads", "clove", "cloves", "stalk", "stalks", "sprig", "sprigs", "strip", "strips"]
+                
+                if unitWords.contains(firstWord) {
+                    // First word is a unit, pluralize it
+                    let pluralizedUnit = pluralizeUnit(firstWord, quantity: scaledQuantity)
+                    let remainingWords = Array(words.dropFirst()).joined(separator: " ")
+                    if remainingWords.isEmpty {
+                        return "\(formattedQuantity) \(pluralizedUnit)"
+                    } else {
+                        return "\(formattedQuantity) \(pluralizedUnit) \(remainingWords)"
+                    }
+                }
+            }
+        }
+        
+        return "\(formattedQuantity)\(restOfLine.isEmpty ? "" : " \(restOfLine)")"
+    }
+    
+    // Format scale factor for display (e.g., 1.5 -> "1 1/2", 1.25 -> "1 1/4")
+    private func formatScaleFactor() -> String {
+        if selectedWholeNumber == 1 && selectedFraction == .none {
+            return "1"
+        }
+        if selectedWholeNumber == 0 {
+            return selectedFraction.displayName
+        }
+        if selectedFraction == .none {
+            return "\(selectedWholeNumber)"
+        }
+        return "\(selectedWholeNumber) \(selectedFraction.displayName)"
+    }
+    
+    // Format scaled quantity with proper fraction simplification (e.g., 2/4 -> 1/2, 4/4 -> 1)
+    private func formatScaledQuantity(_ quantity: Double) -> String {
+        guard quantity > 0 else { return "0" }
+        
+        let whole = Int(quantity)
+        let decimal = quantity - Double(whole)
+        
+        // If no decimal part, return whole number
+        if abs(decimal) < 0.001 {
+            return "\(whole)"
+        }
+        
+        // Convert decimal to fraction and simplify
+        // Use common denominator approach
+        let tolerance = 0.001
+        let commonDenominators = [2, 3, 4, 5, 6, 8, 10, 12, 16]
+        
+        for den in commonDenominators {
+            let num = round(decimal * Double(den))
+            let calculated = num / Double(den)
+            
+            if abs(decimal - calculated) < tolerance {
+                let simplified = simplifyFraction(Int(num), den)
+                var (numFinal, denFinal) = simplified
+                
+                // RULE: If numerator equals denominator after simplification, convert to whole number
+                // Example: 4/4 → 1/1 → 1, 8/8 → 1/1 → 1, 1/4 × 4 = 4/4 → 1
+                if numFinal == denFinal {
+                    // This represents a whole number (e.g., 4/4 = 1)
+                    return "\(whole + 1)"
+                }
+                
+                // RULE: If numerator > denominator, convert to mixed number
+                // Example: 5/4 → 1 1/4, 8/3 → 2 2/3
+                if numFinal > denFinal {
+                    let extraWhole = numFinal / denFinal
+                    let remainderNum = numFinal % denFinal
+                    let newWhole = whole + extraWhole
+                    
+                    if remainderNum == 0 {
+                        // No remainder, just return whole number
+                        return "\(newWhole)"
+                    } else {
+                        // Simplify the remainder fraction
+                        let remainderSimplified = simplifyFraction(remainderNum, denFinal)
+                        return "\(newWhole) \(remainderSimplified.0)/\(remainderSimplified.1)"
+                    }
+                }
+                
+                // Normal case: proper fraction (numerator < denominator)
+                if whole == 0 {
+                    return "\(numFinal)/\(denFinal)"
+                } else {
+                    return "\(whole) \(numFinal)/\(denFinal)"
+                }
+            }
+        }
+        
+        // Fallback: format as decimal (rounded to 2 places)
+        let rounded = round(quantity * 100) / 100
+        if rounded == Double(whole) {
+            return "\(whole)"
+        } else {
+            let decimalStr = String(format: "%.2f", rounded)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "0"))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return whole == 0 ? decimalStr : "\(whole) \(decimalStr)"
+        }
+    }
+    
+    // Helper to simplify fractions using GCD
+    private func simplifyFraction(_ numerator: Int, _ denominator: Int) -> (Int, Int) {
+        guard denominator != 0 else { return (numerator, denominator) }
+        let gcd = findGCD(abs(numerator), abs(denominator))
+        return (numerator / gcd, denominator / gcd)
+    }
+    
+    // Helper to find Greatest Common Divisor
+    private func findGCD(_ a: Int, _ b: Int) -> Int {
+        if b == 0 {
+            return a
+        }
+        return findGCD(b, a % b)
+    }
+    
+    // MARK: - Unit Conversion Functions
+    
+    // Convert ingredients from US to Metric
+    private func convertIngredientsToMetric(_ ingredientsText: String) -> String {
+        let lines = ingredientsText.components(separatedBy: "\n")
+        let convertedLines = lines.map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { return line }
+            
+            // Check if already in metric (contains ml, g, kg, etc.)
+            let metricPattern = #"(?i)\b(ml|milliliter|milliliters|g|gram|grams|kg|kilogram|kilograms|°c|celsius)\b"#
+            if let regex = try? NSRegularExpression(pattern: metricPattern),
+               regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
+                return line // Already metric, don't convert
+            }
+            
+            // Don't convert items without measurements
+            if shouldSkipConversion(trimmed) {
+                return line
+            }
+            
+            // Try to convert the line
+            if let converted = convertLineToMetric(trimmed) {
+                return converted
+            }
+            
+            return line
+        }
+        
+        return convertedLines.joined(separator: "\n")
+    }
+    
+    // Convert ingredients from Metric to US
+    private func convertIngredientsToUS(_ ingredientsText: String) -> String {
+        let lines = ingredientsText.components(separatedBy: "\n")
+        let convertedLines = lines.map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { return line }
+            
+            // Check if already in US (contains cup, tbsp, tsp, oz, lb, °f, fahrenheit)
+            let usPattern = #"(?i)\b(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|pound|pounds|°f|fahrenheit)\b"#
+            if let regex = try? NSRegularExpression(pattern: usPattern),
+               regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
+                return line // Already US, don't convert
+            }
+            
+            // Don't convert items without measurements
+            if shouldSkipConversion(trimmed) {
+                return line
+            }
+            
+            // Try to convert the line
+            if let converted = convertLineToUS(trimmed) {
+                return converted
+            }
+            
+            return line
+        }
+        
+        return convertedLines.joined(separator: "\n")
+    }
+    
+    // Check if ingredient should be skipped (no measurable units)
+    private func shouldSkipConversion(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        
+        // Skip if contains non-measurable terms
+        let skipPatterns = [
+            "egg", "eggs", "pinch", "dash", "sprinkle", "to taste", "as needed",
+            "as desired", "handful", "bunch", "head", "clove", "cloves", "stalk", "stalks"
+        ]
+        
+        for pattern in skipPatterns {
+            if lowercased.contains(pattern) {
+                // Check if it's not part of a measurement (e.g., "egg" in "egg whites" is OK to skip)
+                // But "egg whites" with a number should be converted if it has a unit
+                let startsWithNumber = (try? NSRegularExpression(pattern: #"^\d"#))?.firstMatch(in: lowercased, range: NSRange(lowercased.startIndex..., in: lowercased)) != nil
+                if !startsWithNumber {
+                    return true
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    // Convert a single line to metric
+    private func convertLineToMetric(_ line: String) -> String? {
+        // Pattern 1: Parenthetical unit pattern - "1 (32-ounce) carton..." or "1 (4 1/2-pound) roast..."
+        // Matches: quantity (number/fraction - unit) ingredient
+        let parentheticalPattern = #"^(\d+)\s*\((\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+\s*[½⅓⅔¼¾])\s*[-–]\s*(ounce|ounces|oz|pound|pounds|lb|fl\s*oz|fluid\s*ounce|fluid\s*ounces)\)\s+(.+)$"#
+        
+        // Try parenthetical pattern first (more specific)
+        if let regex = try? NSRegularExpression(pattern: parentheticalPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+            
+            guard let quantityRange = Range(match.range(at: 1), in: line),
+                  let parenQuantityRange = Range(match.range(at: 2), in: line),
+                  let parenUnitRange = Range(match.range(at: 3), in: line),
+                  let ingredientRange = Range(match.range(at: 4), in: line) else {
+                return nil
+            }
+            
+            let quantityStr = String(line[quantityRange]) // The "1" before parentheses
+            let parenQuantityStr = String(line[parenQuantityRange]) // The "32" or "4 1/2" in parentheses
+            let parenUnit = String(line[parenUnitRange]).lowercased().trimmingCharacters(in: .whitespaces)
+            let ingredient = String(line[ingredientRange]).trimmingCharacters(in: .whitespaces)
+            
+            // Parse the parenthetical quantity (this is what we convert)
+            guard let parenQuantity = parseQuantity(parenQuantityStr) else { return nil }
+            
+            // Skip conversion for teaspoons and tablespoons (commonly used in Europe)
+            if parenUnit == "tsp" || parenUnit == "teaspoon" || parenUnit == "teaspoons" ||
+               parenUnit == "tbsp" || parenUnit == "tablespoon" || parenUnit == "tablespoons" {
+                // Keep original format: "1 (2 tbsp) ingredient"
+                return line // Return unchanged
+            }
+            
+            // Convert based on unit type in parentheses
+            // Special handling: "ounce" in parentheses can be fluid ounce (for liquids) or weight ounce (for solids)
+            let converted: String
+            if isLiquidUnit(parenUnit) {
+                converted = convertLiquidToMetric(quantity: parenQuantity, unit: parenUnit)
+            } else if parenUnit == "ounce" || parenUnit == "ounces" || parenUnit == "oz" {
+                // Check if ingredient is a liquid (broth, juice, milk, water, etc.)
+                let lowercasedIngredient = ingredient.lowercased()
+                let liquidKeywords = ["broth", "juice", "milk", "water", "stock", "soup", "sauce", "cream", "wine", "beer", "soda", "drink", "beverage", "carton", "can", "bottle"]
+                let isLiquidIngredient = liquidKeywords.contains { lowercasedIngredient.contains($0) }
+                
+                if isLiquidIngredient {
+                    // Treat as fluid ounce for liquids
+                    converted = convertLiquidToMetric(quantity: parenQuantity, unit: "fl oz")
+                } else {
+                    // Treat as weight ounce for solids
+                    converted = convertWeightToMetric(quantity: parenQuantity, unit: parenUnit, ingredient: ingredient)
+                }
+            } else if isWeightUnit(parenUnit) {
+                converted = convertWeightToMetric(quantity: parenQuantity, unit: parenUnit, ingredient: ingredient)
+            } else {
+                return nil
+            }
+            
+            // Return with the initial quantity preserved: "1 (946ml) carton..."
+            return "\(quantityStr) (\(converted)) \(ingredient)"
+        }
+        
+        // Pattern 2: Standard pattern (existing) - quantity + unit + ingredient
+        let standardPattern = #"^(\d+(?:\s+\d+/\d+)?|\d+/\d+|\d+\s*[½⅓⅔¼¾])\s*(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|pound|pounds|fl\s*oz|fluid\s*ounce|fluid\s*ounces)\s+(.+)$"#
+        
+        if let regex = try? NSRegularExpression(pattern: standardPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+            
+            guard let quantityRange = Range(match.range(at: 1), in: line),
+                  let unitRange = Range(match.range(at: 2), in: line),
+                  let ingredientRange = Range(match.range(at: 3), in: line) else {
+                return nil
+            }
+            
+            let quantityStr = String(line[quantityRange])
+            let unit = String(line[unitRange]).lowercased().trimmingCharacters(in: .whitespaces)
+            let ingredient = String(line[ingredientRange]).trimmingCharacters(in: .whitespaces)
+            
+            // Skip conversion for teaspoons and tablespoons (commonly used in Europe)
+            if unit == "tsp" || unit == "teaspoon" || unit == "teaspoons" ||
+               unit == "tbsp" || unit == "tablespoon" || unit == "tablespoons" {
+                return line // Return unchanged
+            }
+            
+            // Parse quantity
+            guard let quantity = parseQuantity(quantityStr) else { return nil }
+            
+            // Convert based on unit type
+            let converted: String
+            if isLiquidUnit(unit) {
+                converted = convertLiquidToMetric(quantity: quantity, unit: unit)
+            } else if isWeightUnit(unit) {
+                converted = convertWeightToMetric(quantity: quantity, unit: unit, ingredient: ingredient)
+            } else {
+                return nil
+            }
+            
+            return "\(converted) \(ingredient)"
+        }
+        
+        return nil
+    }
+    
+    // Convert a single line to US
+    private func convertLineToUS(_ line: String) -> String? {
+        // Pattern to match: quantity (number, fraction, or mixed) + unit + ingredient
+        let pattern = #"^(\d+(?:\.\d+)?)\s*(ml|milliliter|milliliters|g|gram|grams|kg|kilogram|kilograms)\s+(.+)$"#
+        
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else {
+            return nil
+        }
+        
+        guard let quantityRange = Range(match.range(at: 1), in: line),
+              let unitRange = Range(match.range(at: 2), in: line),
+              let ingredientRange = Range(match.range(at: 3), in: line) else {
+            return nil
+        }
+        
+        let quantityStr = String(line[quantityRange])
+        let unit = String(line[unitRange]).lowercased().trimmingCharacters(in: .whitespaces)
+        let ingredient = String(line[ingredientRange]).trimmingCharacters(in: .whitespaces)
+        
+        guard let quantity = Double(quantityStr) else { return nil }
+        
+        // Convert based on unit type
+        let converted: String
+        if unit.hasPrefix("ml") {
+            converted = convertLiquidToUS(quantity: quantity)
+        } else if unit.hasPrefix("g") || unit.hasPrefix("kg") {
+            let grams = unit.hasPrefix("kg") ? quantity * 1000 : quantity
+            converted = convertWeightToUS(quantity: grams, ingredient: ingredient)
+        } else {
+            return nil
+        }
+        
+        return "\(converted) \(ingredient)"
+    }
+    
+    // Parse quantity string (handles fractions, mixed numbers, Unicode fractions)
+    private func parseQuantity(_ quantityStr: String) -> Double? {
+        // Handle Unicode fractions
+        let unicodeFractions: [String: Double] = [
+            "½": 0.5, "⅓": 0.333333, "⅔": 0.666667, "¼": 0.25, "¾": 0.75
+        ]
+        
+        // Check for Unicode fraction
+        for (unicode, value) in unicodeFractions {
+            if quantityStr.contains(unicode) {
+                let wholePart = quantityStr.replacingOccurrences(of: unicode, with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                let whole = Double(wholePart) ?? 0
+                return whole + value
+            }
+        }
+        
+        // Handle regular fractions like "1/2" or "2/3"
+        if quantityStr.contains("/") && !quantityStr.contains(" ") {
+            let parts = quantityStr.split(separator: "/")
+            if parts.count == 2, let num = Double(parts[0]), let den = Double(parts[1]), den != 0 {
+                return num / den
+            }
+        }
+        
+        // Handle mixed numbers like "1 1/2" or "2 2/3"
+        if quantityStr.contains(" ") {
+            let parts = quantityStr.split(separator: " ")
+            if parts.count == 2, let whole = Double(parts[0]) {
+                let fracPart = String(parts[1])
+                if fracPart.contains("/") {
+                    let fracParts = fracPart.split(separator: "/")
+                    if fracParts.count == 2, let num = Double(fracParts[0]), let den = Double(fracParts[1]), den != 0 {
+                        return whole + (num / den)
+                    }
+                }
+                return whole
+            }
+        }
+        
+        // Simple number
+        return Double(quantityStr)
+    }
+    
+    // Check if unit is a liquid unit
+    private func isLiquidUnit(_ unit: String) -> Bool {
+        let liquidUnits = ["cup", "cups", "tbsp", "tablespoon", "tablespoons", "tsp", "teaspoon", "teaspoons", "fl oz", "fluid ounce", "fluid ounces"]
+        return liquidUnits.contains(unit)
+    }
+    
+    // Check if unit is a weight unit
+    private func isWeightUnit(_ unit: String) -> Bool {
+        let weightUnits = ["oz", "ounce", "ounces", "lb", "pound", "pounds"]
+        return weightUnits.contains(unit)
+    }
+    
+    // Convert liquid to metric
+    private func convertLiquidToMetric(quantity: Double, unit: String) -> String {
+        let ml: Double
+        switch unit.lowercased() {
+        case "cup", "cups": ml = quantity * 240
+        case "tbsp", "tablespoon", "tablespoons": ml = quantity * 15
+        case "tsp", "teaspoon", "teaspoons": ml = quantity * 5
+        case "fl oz", "fluid ounce", "fluid ounces": ml = quantity * 29.5735  // More precise: 1 fl oz = 29.5735ml
+        default: return ""
+        }
+        
+        // Round to whole number for ml
+        return "\(Int(round(ml)))ml"
+    }
+    
+    // Convert weight to metric (grams)
+    private func convertWeightToMetric(quantity: Double, unit: String, ingredient: String) -> String {
+        let grams: Double
+        switch unit.lowercased() {
+        case "oz", "ounce", "ounces": grams = quantity * 28.35
+        case "lb", "pound", "pounds": grams = quantity * 453.59
+        default:
+            // Try to convert cups to grams based on ingredient type
+            if unit.lowercased().contains("cup") {
+                grams = convertCupToGrams(quantity: quantity, ingredient: ingredient)
+            } else {
+                return ""
+            }
+        }
+        
+        // Round to whole number for grams
+        return "\(Int(round(grams)))g"
+    }
+    
+    // Convert cups to grams based on ingredient type
+    private func convertCupToGrams(quantity: Double, ingredient: String) -> Double {
+        let lowercased = ingredient.lowercased()
+        
+        // Ingredient-specific conversions
+        if lowercased.contains("flour") {
+            return quantity * 120
+        } else if lowercased.contains("sugar") && !lowercased.contains("brown") {
+            return quantity * 200
+        } else if lowercased.contains("brown sugar") {
+            return quantity * 220
+        } else if lowercased.contains("butter") {
+            return quantity * 227
+        } else if lowercased.contains("powdered sugar") || lowercased.contains("confectioner") {
+            return quantity * 120
+        } else if lowercased.contains("cocoa") {
+            return quantity * 85
+        } else if lowercased.contains("oats") {
+            return quantity * 100
+        } else if lowercased.contains("rice") && !lowercased.contains("cooked") {
+            return quantity * 185
+        } else if lowercased.contains("cheese") {
+            return quantity * 113
+        } else if lowercased.contains("nuts") {
+            return quantity * 135
+        } else {
+            // Default for other solids
+            return quantity * 120
+        }
+    }
+    
+    // Convert liquid from metric to US
+    private func convertLiquidToUS(quantity: Double) -> String {
+        // Convert ml to most readable US unit
+        if quantity >= 240 {
+            let cups = quantity / 240
+            let rounded = round(cups * 4) / 4 // Round to nearest 1/4 cup
+            return formatUSQuantity(rounded, unit: "cup")
+        } else if quantity >= 15 {
+            let tbsp = quantity / 15
+            let rounded = round(tbsp * 2) / 2 // Round to nearest 1/2 tbsp
+            return formatUSQuantity(rounded, unit: "tbsp")
+        } else {
+            let tsp = quantity / 5
+            let rounded = round(tsp * 2) / 2 // Round to nearest 1/2 tsp
+            return formatUSQuantity(rounded, unit: "tsp")
+        }
+    }
+    
+    // Convert weight from metric to US
+    private func convertWeightToUS(quantity: Double, ingredient: String) -> String {
+        // Convert grams to most readable US unit
+        if quantity >= 453.59 {
+            let pounds = quantity / 453.59
+            let rounded = round(pounds * 4) / 4
+            return formatUSQuantity(rounded, unit: "lb")
+        } else if quantity >= 28.35 {
+            let ounces = quantity / 28.35
+            let rounded = round(ounces * 4) / 4
+            return formatUSQuantity(rounded, unit: "oz")
+        } else {
+            // For small amounts, try to convert to cups based on ingredient
+            let cups = convertGramsToCups(quantity: quantity, ingredient: ingredient)
+            if cups > 0 {
+                let rounded = round(cups * 4) / 4
+                return formatUSQuantity(rounded, unit: "cup")
+            } else {
+                // Fallback to ounces
+                let ounces = quantity / 28.35
+                let rounded = round(ounces * 4) / 4
+                return formatUSQuantity(rounded, unit: "oz")
+            }
+        }
+    }
+    
+    // Convert grams to cups based on ingredient type (reverse of convertCupToGrams)
+    private func convertGramsToCups(quantity: Double, ingredient: String) -> Double {
+        let lowercased = ingredient.lowercased()
+        
+        if lowercased.contains("flour") {
+            return quantity / 120
+        } else if lowercased.contains("sugar") && !lowercased.contains("brown") {
+            return quantity / 200
+        } else if lowercased.contains("brown sugar") {
+            return quantity / 220
+        } else if lowercased.contains("butter") {
+            return quantity / 227
+        } else if lowercased.contains("powdered sugar") || lowercased.contains("confectioner") {
+            return quantity / 120
+        } else if lowercased.contains("cocoa") {
+            return quantity / 85
+        } else if lowercased.contains("oats") {
+            return quantity / 100
+        } else if lowercased.contains("rice") && !lowercased.contains("cooked") {
+            return quantity / 185
+        } else if lowercased.contains("cheese") {
+            return quantity / 113
+        } else if lowercased.contains("nuts") {
+            return quantity / 135
+        } else {
+            return quantity / 120 // Default
+        }
+    }
+    
+    // Format US quantity with proper fractions
+    private func formatUSQuantity(_ quantity: Double, unit: String) -> String {
+        let whole = Int(quantity)
+        let decimal = quantity - Double(whole)
+        
+        if abs(decimal) < 0.001 {
+            let pluralized = whole == 1 ? unit : pluralizeUSUnit(unit)
+            return "\(whole) \(pluralized)"
+        }
+        
+        // Convert decimal to fraction
+        let tolerance = 0.001
+        let fractions: [(Double, String)] = [
+            (0.25, "1/4"), (0.33, "1/3"), (0.5, "1/2"), (0.67, "2/3"), (0.75, "3/4")
+        ]
+        
+        for (value, frac) in fractions {
+            if abs(decimal - value) < tolerance {
+                let pluralized = whole == 0 && value >= 0.5 ? pluralizeUSUnit(unit) : unit
+                if whole == 0 {
+                    return "\(frac) \(pluralized)"
+                } else {
+                    return "\(whole) \(frac) \(pluralizeUSUnit(unit))"
+                }
+            }
+        }
+        
+        // Fallback
+        let rounded = round(quantity * 4) / 4
+        let pluralized = rounded >= 1 ? pluralizeUSUnit(unit) : unit
+        return String(format: "%.2f", rounded).trimmingCharacters(in: CharacterSet(charactersIn: "0")).trimmingCharacters(in: CharacterSet(charactersIn: ".")) + " \(pluralized)"
+    }
+    
+    // Pluralize US unit
+    private func pluralizeUSUnit(_ unit: String) -> String {
+        switch unit.lowercased() {
+        case "cup": return "cups"
+        case "tbsp": return "tbsp"
+        case "tsp": return "tsp"
+        case "oz": return "oz"
+        case "lb": return "lb"
+        default: return unit + "s"
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Recipe Header
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(currentRecipe.title)
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 20)
+                        
+                        // Source URL link (moved here from below image)
+                        if let sourceURL = currentRecipe.sourceURL, !sourceURL.isEmpty {
+                            HStack {
+                                Button(action: {
+                                    if let url = URL(string: sourceURL) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }) {
+                                    Text(extractDomain(from: sourceURL))
+                                        .font(.subheadline)
+                                        .foregroundColor(.blue)
+                                        .underline()
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                        
+                        if !currentRecipe.description.isEmpty {
+                            Text(currentRecipe.description)
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 20)
+                        }
+                        
+                        HStack {
+                            // Only show prep time if valid (1-600 minutes)
+                            if currentRecipe.prepTime > 0 && currentRecipe.prepTime <= 600 {
+                                Label("\(currentRecipe.prepTimeFormatted)", systemImage: "clock")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            if currentRecipe.cookTime > 0 {
+                                Label("\(currentRecipe.cookTimeFormatted)", systemImage: "flame")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            // Only show servings if valid (2-50)
+                            if currentRecipe.servings >= 2 && currentRecipe.servings <= 50 {
+                                // Calculate scaled servings
+                                let scaledServings = Int(round(Double(currentRecipe.servings) * scaleFactor))
+                                let servingsText = scaleFactor != 1.0 
+                                    ? "\(scaledServings) serving\(scaledServings == 1 ? "" : "s") (Scaled)"
+                                    : "\(currentRecipe.servings) serving\(currentRecipe.servings == 1 ? "" : "s")"
+                                
+                                Label(servingsText, systemImage: "person.2")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.vertical, 16)
+                    
+                    // Recipe Image with Score Circle Overlay
+                    if let imageUrl = currentRecipe.image, !imageUrl.isEmpty {
+                        // Fix malformed URLs that start with //
+                        let fixedImageUrl = imageUrl.hasPrefix("//") ? "https:" + imageUrl : imageUrl
+                        
+                        VStack(spacing: 8) {
+                            ZStack(alignment: .bottomTrailing) {
+                                RecipeRemoteImage(urlString: fixedImageUrl)
+                                    .frame(height: 200)
+                                    .cornerRadius(12)
+                                    .clipped()
+                                
+                                // Score Circle Overlay
+                                RecipeScoreCircleOverlay(
+                                    recipe: latestRecipe,
+                                    isAnalyzing: isAnalyzing,
+                                    onTap: {
+                                        handleScoreCircleTap()
+                                    }
+                                )
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 16)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        // Rating and Category Dropdowns (moved here from below title)
+                        HStack(spacing: 16) {
+                            // Star Rating Picker
+                            StarRatingPicker(rating: $currentRating)
+                                .onChange(of: currentRating) { newValue in
+                                    currentRecipe.rating = Double(newValue)
+                                    saveRecipeChanges()
+                                }
+                            
+                            // Category Picker (removed Spacer() to reduce gap)
+                            CategoryPicker(
+                                selectedCategories: $currentCategories,
+                                customCategories: $currentCustomCategories,
+                                showingCustomCategorySheet: $showingCustomCategorySheet,
+                                newCustomCategory: $newCustomCategory
+                            )
+                            .onChange(of: currentCategories) { newCategories in
+                                currentRecipe.categories = newCategories
+                                saveRecipeChanges()
+                            }
+                            .onChange(of: currentCustomCategories) { newCustoms in
+                                currentRecipe.customCategories = newCustoms
+                                saveRecipeChanges()
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
+                        
+                        // Scale & Convert button - 3pt spacing above from dropdowns, 3pt below to Ingredients
+                                HStack {
+                                    Button(action: {
+                                showingScaleConvertModal = true
+                                    }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "slider.horizontal.3")
+                                            .font(.subheadline)
+                                            .foregroundColor(.blue)
+                                    Text("Scale & Convert")
+                                        .font(.subheadline)
+                                        .foregroundColor(.blue)
+                                }
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 20)
+                        .padding(.top, 3)  // 3pt spacing from dropdowns above
+                        .padding(.bottom, 3)  // 3pt spacing to Ingredients header below
+                    }
+                    
+                    // Ingredients
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                        Text("Ingredients")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            
+                            Spacer()
+                        }
+                            .padding(.horizontal, 20)
+                        .padding(.bottom, 3)  // 3pt spacing to ingredients list
+                        
+                        if let ingredients = currentRecipe.ingredientsText, !ingredients.isEmpty {
+                            // Apply unit conversion first (only convert to metric if needed)
+                            // Recipes are stored in US, so we only convert when Metric is selected
+                            let convertedIngredients = currentUnitSystem == .metric
+                                ? convertIngredientsToMetric(ingredients)
+                                : ingredients
+                            
+                            // Display scaled ingredients
+                            let scaledIngredients = scaleFactor != 1.0 
+                                ? scaleIngredients(convertedIngredients, by: scaleFactor)
+                                : convertedIngredients
+                            
+                            // Split by newlines and display each ingredient with spacing
+                            let ingredientLines = scaledIngredients.components(separatedBy: "\n").filter { !$0.isEmpty }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(ingredientLines.enumerated()), id: \.offset) { index, ingredient in
+                                    Text(ingredient)
+                                .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .onAppear {
+                                    print("🟢 View: Displaying recipe")
+                                print("🟢 Recipe has ingredientsText? \(currentRecipe.ingredientsText ?? "NO")")
+                                    print("🔍 RecipeDetailView: Displaying ingredients:")
+                                    print("   Length: \(ingredients.count)")
+                                    print("   Content: \(ingredients)")
+                                }
+                        } else {
+                            Text("No ingredients available")
+                                .foregroundColor(.gray)
+                                .italic()
+                                .onAppear {
+                                    print("🔍 RecipeDetailView: No ingredients text found")
+                                    print("   ingredientsText is nil: \(currentRecipe.ingredientsText == nil)")
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    
+                    // Instructions
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Instructions")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 20)
+                        
+                        if let instructions = currentRecipe.instructionsText, !instructions.isEmpty {
+                            Text(instructions)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                        } else {
+                            Text("No instructions available")
+                                .foregroundColor(.gray)
+                                .italic()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                }
+            }
+            .navigationTitle("Recipe Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        // Dismiss without saving changes
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        // Save all changes: rating, category, and scale factor
+                        if hasScaleChanged {
+                            saveScaleFactor()
+                        }
+                        // Save rating and category changes
+                        saveRecipeChanges()
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                // Sync currentRecipe with latest from manager
+                if let latest = recipeManager.recipes.first(where: { $0.id == recipe.id }) {
+                    currentRecipe = latest
+                }
+                // Load scale factor from recipe
+                originalScaleFactor = currentRecipe.scaleFactor
+                let (whole, fraction) = scaleFactorToPickerValues(currentRecipe.scaleFactor)
+                selectedWholeNumber = whole
+                selectedFraction = fraction
+                
+                // Sync picker state with current recipe
+                currentRating = Int(currentRecipe.rating)
+                currentCategories = currentRecipe.categories
+                currentCustomCategories = currentRecipe.customCategories
+                
+                // Initialize unit system from recipe
+                currentUnitSystem = currentRecipe.unitSystem
+                
+                // Add any existing custom categories to the global list (for backward compatibility)
+                for customCategory in currentRecipe.customCategories {
+                    CustomCategoriesManager.shared.addCustomCategory(customCategory)
+                }
+                
+                // Check if analysis is already in progress or completed
+                checkAnalysisStatus()
+            }
+            .sheet(isPresented: $showingAnalysisView) {
+                if let analysis = cachedAnalysis {
+                    RecipeAnalysisView(recipe: latestRecipe, analysis: analysis)
+                } else {
+                    // Fallback: If cachedAnalysis is nil, try to reconstruct from saved data
+                    if let score = latestRecipe.longevityScore, let report = latestRecipe.analysisReport {
+                        // Try to decode full analysis from saved JSON first
+                        if let fullAnalysis = reconstructAnalysisFromSavedData(recipe: latestRecipe) {
+                            RecipeAnalysisView(recipe: latestRecipe, analysis: fullAnalysis)
+                        } else {
+                            // Fallback: reconstruct minimal analysis from score and summary
+                            let reconstructedAnalysis = reconstructAnalysisFromSavedDataFallback(recipe: latestRecipe, score: score, summary: report)
+                            RecipeAnalysisView(recipe: latestRecipe, analysis: reconstructedAnalysis)
+                        }
+                    } else {
+                        // Shouldn't happen, but show error state
+                        VStack {
+                            Text("Analysis not available")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Button("Dismiss") {
+                                showingAnalysisView = false
+                            }
+                            .padding()
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if showingScaleConvertModal {
+                    ScaleConvertModal(
+                        selectedWholeNumber: $selectedWholeNumber,
+                        selectedFraction: $selectedFraction,
+                        selectedUnitSystem: $currentUnitSystem,
+                        isPresented: $showingScaleConvertModal
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Scale & Convert Modal (Combined)
+struct ScaleConvertModal: View {
+    @Binding var selectedWholeNumber: Int
+    @Binding var selectedFraction: RecipeScaleFraction
+    @Binding var selectedUnitSystem: UnitSystem
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        ZStack {
+            // Fully transparent background so recipe shows through
+            Color.clear
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isPresented = false
+                }
+            
+            // Green bordered box with all content inside
+            VStack(spacing: 0) {
+                // Title at top
+                Text("Scale & Convert")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    .padding(.top, 3)  // 3pt padding above title
+                    .padding(.bottom, 16)
+                
+                // Scale Picker Section
+                VStack(spacing: 3) {
+                    // Centered "Scale" text with highlight box
+                    Text("Scale")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.gray.opacity(0.15))
+                        .cornerRadius(8)
+                        .frame(maxWidth: .infinity)
+                    
+                    HStack(spacing: 0) {
+                        // Whole numbers column (0-10)
+                        Picker("Whole Number", selection: $selectedWholeNumber) {
+                            ForEach(0...10, id: \.self) { num in
+                                Text("\(num)").tag(num)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(width: 80)
+                        
+                        // Fractions column (none, 1/4, 1/3, 1/2, 2/3, 3/4)
+                        Picker("Fraction", selection: $selectedFraction) {
+                            ForEach(RecipeScaleFraction.allCases, id: \.self) { fraction in
+                                Text(fraction.displayName.isEmpty ? "—" : fraction.displayName)
+                                    .tag(fraction)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(width: 80)
+                    }
+                    .frame(height: 150)
+                    .padding(.horizontal, 20)
+                }
+                .padding(.bottom, 3)
+                
+                // Divider
+                Divider()
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                
+                // Unit System Picker Section
+                VStack(spacing: 3) {
+                    // Centered "Units" text with highlight box
+                    Text("Units")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.gray.opacity(0.15))
+                        .cornerRadius(8)
+                        .frame(maxWidth: .infinity)
+                    
+                    Picker("Unit System", selection: $selectedUnitSystem) {
+                        Text("US").tag(UnitSystem.us)
+                        Text("Metric").tag(UnitSystem.metric)
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 100)
+                    .padding(.horizontal, 20)
+                }
+                .padding(.bottom, 3)
+                
+                // Done button at bottom
+                Button(action: {
+                    isPresented = false
+                }) {
+                    Text("Done")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color(red: 0.42, green: 0.557, blue: 0.498))
+                        .cornerRadius(10)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 3)  // 3pt padding below Done button
+            }
+            .frame(width: 240, height: 480)
+            .background(Color(UIColor.systemBackground))
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color(red: 0.608, green: 0.827, blue: 0.835), lineWidth: 2)
+            )
+            .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+        }
+    }
+}
+
+// MARK: - Recipe Score Circle Overlay
+struct RecipeScoreCircleOverlay: View {
+    let recipe: Recipe
+    let isAnalyzing: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                // Background circle with gradient (red to green based on score)
+                if isAnalyzing {
+                    // Loading state - gray background
+                    Circle()
+                        .fill(Color.gray.opacity(0.8))
+                        .frame(width: 90, height: 90)
+                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+                } else if let score = recipe.longevityScore {
+                    // Score exists - gradient background (red to green)
+                    Circle()
+                        .fill(scoreGradient(score))
+                        .frame(width: 90, height: 90)
+                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+                } else {
+                    // No score - trademark green background
+                    Circle()
+                        .fill(Color(red: 0.42, green: 0.557, blue: 0.498))
+                        .frame(width: 90, height: 90)
+                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+                }
+                
+                if isAnalyzing {
+                    // Loading state
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.3)
+                } else if let score = recipe.longevityScore {
+                    // Score exists - show number and one-word summary (white text - reverse type)
+                    VStack(spacing: -4) {
+                        Text("\(score)")
+                            .font(.system(size: 46, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text(scoreLabel(score).uppercased())
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                } else {
+                    // No score - show "TAP to score recipe" (white bold text)
+                    VStack(spacing: 0) {
+                        Text("TAP")
+                            .font(.system(size: 28, weight: .black))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        
+                        VStack(spacing: 0) {
+                            Text("to score")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                            
+                            Text("recipe")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isAnalyzing)
+    }
+    
+    // Gradient that runs from red to green based on score (darker gradations for better contrast)
+    private func scoreGradient(_ score: Int) -> LinearGradient {
+        let progress = CGFloat(score) / 100.0
+        
+        // Red to green gradient based on score with darker gradations for better text contrast
+        // 0-40: Dark red to dark orange
+        // 41-60: Dark orange to dark yellow
+        // 61-80: Dark yellow to darker green
+        // 81-100: Darker green to dark green
+        
+        let startColor: Color
+        let endColor: Color
+        
+        if progress <= 0.4 {
+            // Dark red to dark orange
+            startColor = Color(red: 0.8, green: 0.1, blue: 0.1)
+            endColor = Color(red: 0.9, green: 0.4, blue: 0.1)
+        } else if progress <= 0.6 {
+            // Dark orange to dark yellow
+            startColor = Color(red: 0.9, green: 0.5, blue: 0.1)
+            endColor = Color(red: 0.9, green: 0.7, blue: 0.2)
+        } else if progress <= 0.8 {
+            // Dark yellow to darker green
+            startColor = Color(red: 0.8, green: 0.7, blue: 0.2)
+            endColor = Color(red: 0.4, green: 0.7, blue: 0.4)
+        } else {
+            // Darker green to dark green
+            startColor = Color(red: 0.3, green: 0.6, blue: 0.3)
+            endColor = Color(red: 0.2, green: 0.5, blue: 0.2)
+        }
+        
+        return LinearGradient(
+            gradient: Gradient(colors: [startColor, endColor]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 80...100: return Color(red: 0.42, green: 0.557, blue: 0.498)
+        case 60...79: return Color(red: 0.502, green: 0.706, blue: 0.627)
+        case 40...59: return Color.orange
+        default: return Color.red
+        }
+    }
+    
+    private func scoreLabel(_ score: Int) -> String {
+        switch score {
+        case 90...100: return "Exceptional"
+        case 80...89: return "Excellent"
+        case 70...79: return "Very Good"
+        case 60...69: return "Good"
+        case 50...59: return "Moderate"
+        case 40...49: return "Fair"
+        default: return "Limited"
+        }
+    }
+}
+
+// MARK: - Star Rating Picker
+struct StarRatingPicker: View {
+    @Binding var rating: Int
+    
+    private func starString(_ count: Int) -> String {
+        String(repeating: "⭐", count: count)
+    }
+    
+    var body: some View {
+        Menu {
+            // 0 Stars option (Not Rated)
+            Button(action: {
+                rating = 0
+            }) {
+                HStack {
+                    Text("Not Rated")
+                    if rating == 0 {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+            
+            Divider()
+            
+            // 1-5 Stars options
+            ForEach(1...5, id: \.self) { starCount in
+                Button(action: {
+                    rating = starCount
+                }) {
+                    HStack {
+                        Text(starString(starCount))
+                        if rating == starCount {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if rating > 0 && rating <= 5 {
+                    Text(starString(rating))
+                        .font(.subheadline)
+                } else {
+                    Text("Not Rated")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .fixedSize()  // Prevent text wrapping
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minWidth: 150)  // Ensure minimum width for 5 stars
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Category Picker
+struct CategoryPicker: View {
+    @Binding var selectedCategories: [RecipeCategory]
+    @Binding var customCategories: [String]
+    @Binding var showingCustomCategorySheet: Bool
+    @Binding var newCustomCategory: String
+    
+    // Load all custom categories from global list
+    private var allCustomCategories: [String] {
+        CustomCategoriesManager.shared.getAllCustomCategories()
+    }
+    
+    var displayText: String {
+        var allCategories: [String] = []
+        
+        // Add predefined categories
+        allCategories.append(contentsOf: selectedCategories.map { $0.displayName })
+        
+        // Add custom categories (from current recipe)
+        allCategories.append(contentsOf: customCategories.filter { !$0.isEmpty })
+        
+        if allCategories.isEmpty {
+            return "Uncategorized"
+        } else if allCategories.count <= 2 {
+            return allCategories.joined(separator: ", ")
+        } else {
+            return "\(allCategories.count) categories"
+        }
+    }
+    
+    var body: some View {
+        Menu {
+            // Add Custom Category option (at top)
+            Button(action: {
+                newCustomCategory = ""
+                showingCustomCategorySheet = true
+            }) {
+                HStack {
+                    Image(systemName: "plus.circle")
+                    Text("Add Custom Category...")
+                }
+            }
+            
+            Divider()
+            
+            // Show all custom categories from global list (alphabetized)
+            let sortedCustomCategories = allCustomCategories.sorted()
+            if !sortedCustomCategories.isEmpty {
+                ForEach(sortedCustomCategories, id: \.self) { custom in
+                    Button(action: {
+                        // Toggle custom category selection
+                        if customCategories.contains(custom) {
+                            customCategories.removeAll { $0 == custom }
+                        } else {
+                            customCategories.append(custom)
+                        }
+                    }) {
+                        HStack {
+                            Text(custom)
+                            if customCategories.contains(custom) {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+                Divider()
+            }
+            
+            // All predefined categories (filtered and alphabetized)
+            let filteredCategories = RecipeCategory.allCases.filter { category in
+                category != .mealPrep && category != .beverage && category != .main
+            }.sorted { $0.displayName < $1.displayName }
+            
+            ForEach(filteredCategories) { category in
+                Button(action: {
+                    // Toggle category selection
+                    if selectedCategories.contains(category) {
+                        selectedCategories.removeAll { $0 == category }
+                    } else {
+                        selectedCategories.append(category)
+                    }
+                }) {
+                    HStack {
+                        Text(category.displayName)
+                        if selectedCategories.contains(category) {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(displayText)
+                    .font(.subheadline)
+                    .foregroundColor(displayText == "Uncategorized" ? .secondary : .primary)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .fixedSize()  // Prevent "Uncategorized" from wrapping
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .sheet(isPresented: $showingCustomCategorySheet) {
+            CustomCategorySheet(
+                customCategories: $customCategories,
+                newCustomCategory: $newCustomCategory,
+                isPresented: $showingCustomCategorySheet
+            )
+        }
+    }
+}
+
+// MARK: - Custom Categories Manager
+class CustomCategoriesManager {
+    static let shared = CustomCategoriesManager()
+    private let userDefaults = UserDefaults.standard
+    private let key = "GlobalCustomCategories"
+    
+    private init() {}
+    
+    // Get all custom categories
+    func getAllCustomCategories() -> [String] {
+        return userDefaults.stringArray(forKey: key) ?? []
+    }
+    
+    // Add a custom category to the global list
+    func addCustomCategory(_ category: String) {
+        let trimmed = category.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        
+        var categories = getAllCustomCategories()
+        if !categories.contains(trimmed) {
+            categories.append(trimmed)
+            userDefaults.set(categories, forKey: key)
+            userDefaults.synchronize()
+        }
+    }
+    
+    // Remove a custom category from the global list
+    func removeCustomCategory(_ category: String) {
+        var categories = getAllCustomCategories()
+        categories.removeAll { $0 == category }
+        userDefaults.set(categories, forKey: key)
+        userDefaults.synchronize()
+    }
+}
+
+// MARK: - Custom Category Sheet
+struct CustomCategorySheet: View {
+    @Binding var customCategories: [String]
+    @Binding var newCustomCategory: String
+    @Binding var isPresented: Bool
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Enter Custom Category Name")
+                    .font(.headline)
+                    .padding(.top, 20)
+                
+                TextField("Category name", text: $newCustomCategory)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .padding(.horizontal, 20)
+                    .autocapitalization(.words)
+                
+                Spacer()
+            }
+            .navigationTitle("Custom Category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        let trimmed = newCustomCategory.trimmingCharacters(in: .whitespaces)
+                        if !trimmed.isEmpty && !customCategories.contains(trimmed) {
+                            customCategories.append(trimmed)
+                            // Also add to global list for future use
+                            CustomCategoriesManager.shared.addCustomCategory(trimmed)
+                        }
+                        newCustomCategory = ""
+                        dismiss()
+                    }
+                    .disabled(newCustomCategory.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Recipe Grid Card
+struct RecipeGridCard: View {
+    let recipe: Recipe
+    let isEditing: Bool
+    let onTap: () -> Void
+    let onDelete: (Recipe) -> Void
+    
+    @State private var showingDeleteConfirmation = false
+    
+    var body: some View {
+        Button(action: {
+            onTap()
+        }) {
+            VStack(alignment: .leading, spacing: 4) {
+                // Square Image with Score Circle Overlay
+                GeometryReader { geometry in
+                    ZStack(alignment: .bottomTrailing) {
+                        // Recipe Image - ensure perfect square
+                        Group {
+                            if let imageUrl = recipe.image, !imageUrl.isEmpty {
+                                let fixedImageUrl = imageUrl.hasPrefix("//") ? "https:" + imageUrl : imageUrl
+                                
+                                AsyncImage(url: URL(string: fixedImageUrl)) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.3))
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    case .failure:
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.3))
+                                            .overlay(
+                                                Image(systemName: "photo")
+                                                    .foregroundColor(.gray)
+                                                    .font(.system(size: 10))
+                                            )
+                                    @unknown default:
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.3))
+                                    }
+                                }
+                            } else {
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .overlay(
+                                        Image(systemName: "photo")
+                                            .foregroundColor(.gray)
+                                            .font(.system(size: 10))
+                                    )
+                            }
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.width)
+                        .clipped()
+                        .cornerRadius(0) // No rounded corners
+                    
+                        // Score Circle (number only, no text) - lower right corner
+                        if let score = recipe.longevityScore {
+                            Circle()
+                                .fill(scoreGradient(score))
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Text("\(score)")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(.white)
+                                )
+                                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                .padding(4)
+                        }
+                        
+                        // Delete Button (when editing)
+                        if isEditing {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    Button(action: {
+                                        showingDeleteConfirmation = true
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title3)
+                                            .foregroundColor(.red)
+                                            .background(Color.white)
+                                            .clipShape(Circle())
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(4)
+                        }
+                    }
+                }
+                .aspectRatio(1, contentMode: .fit)
+                
+                // Recipe Title (max 2 lines) - smaller text
+                Text(recipe.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(height: 28, alignment: .topLeading)
+                
+                // Star Rating (below title, greyed out if no rating) - smaller
+                if recipe.rating > 0 {
+                    HStack(spacing: 1) {
+                        ForEach(0..<5) { index in
+                            Image(systemName: index < Int(recipe.rating) ? "star.fill" : "star")
+                                .foregroundColor(.yellow)
+                                .font(.system(size: 7))
+                        }
+                    }
+                } else {
+                    HStack(spacing: 1) {
+                        ForEach(0..<5) { _ in
+                            Image(systemName: "star")
+                                .foregroundColor(.gray.opacity(0.3))
+                                .font(.system(size: 7))
+                        }
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .confirmationDialog("Delete Recipe", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDelete(recipe)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to delete '\(recipe.title)'?")
+        }
+    }
+    
+    // Gradient that runs from red to green based on score
+    private func scoreGradient(_ score: Int) -> LinearGradient {
+        let progress = CGFloat(score) / 100.0
+        
+        let startColor: Color
+        let endColor: Color
+        
+        if progress <= 0.4 {
+            startColor = Color(red: 0.8, green: 0.1, blue: 0.1)
+            endColor = Color(red: 0.9, green: 0.4, blue: 0.1)
+        } else if progress <= 0.6 {
+            startColor = Color(red: 0.9, green: 0.5, blue: 0.1)
+            endColor = Color(red: 0.9, green: 0.7, blue: 0.2)
+        } else if progress <= 0.8 {
+            startColor = Color(red: 0.8, green: 0.7, blue: 0.2)
+            endColor = Color(red: 0.4, green: 0.7, blue: 0.4)
+        } else {
+            startColor = Color(red: 0.3, green: 0.6, blue: 0.3)
+            endColor = Color(red: 0.2, green: 0.5, blue: 0.2)
+        }
+        
+        return LinearGradient(
+            gradient: Gradient(colors: [startColor, endColor]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
+// MARK: - Manual Recipe Entry View
+struct ManualRecipeEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var recipeManager = RecipeManager.shared
+    
+    @State private var title = ""
+    @State private var ingredients = ""
+    @State private var instructions = ""
+    @State private var prepTime = ""
+    @State private var cookTime = ""
+    @State private var servings = ""
+    @State private var imageUrl = ""
+    @State private var sourceUrl = ""
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Recipe Information")) {
+                    TextField("Recipe Title", text: $title)
+                    TextField("Image URL (optional)", text: $imageUrl)
+                    TextField("Source URL (optional)", text: $sourceUrl)
+                }
+                
+                Section(header: Text("Ingredients")) {
+                    TextEditor(text: $ingredients)
+                        .frame(height: 150)
+                }
+                
+                Section(header: Text("Instructions")) {
+                    TextEditor(text: $instructions)
+                        .frame(height: 200)
+                }
+                
+                Section(header: Text("Details")) {
+                    TextField("Prep Time (minutes)", text: $prepTime)
+                        .keyboardType(.numberPad)
+                    TextField("Cook Time (minutes)", text: $cookTime)
+                        .keyboardType(.numberPad)
+                    TextField("Servings", text: $servings)
+                        .keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("New Recipe")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        saveRecipe()
+                    }
+                    .disabled(title.isEmpty || ingredients.isEmpty || instructions.isEmpty)
+                }
+            }
+        }
+    }
+    
+    private func saveRecipe() {
+        let newRecipe = Recipe(
+            title: title,
+            image: imageUrl.isEmpty ? nil : imageUrl,
+            prepTime: Int(prepTime) ?? 0,
+            cookTime: Int(cookTime) ?? 0,
+            servings: Int(servings) ?? 0,
+            sourceURL: sourceUrl.isEmpty ? nil : sourceUrl,
+            ingredientsText: ingredients,
+            instructionsText: instructions,
+            isOriginal: false
+        )
+        
+        Task {
+            do {
+                try await recipeManager.saveRecipe(newRecipe)
+                await MainActor.run {
+                    dismiss()
+                }
+            } catch {
+                print("Error saving manual recipe: \(error)")
+            }
+        }
+    }
+}
+
+#Preview {
+    RecipesView()
+}

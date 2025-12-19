@@ -171,3 +171,4 @@ logs/
 # OAuth credentials (sensitive)
 youtube_oauth_credentials.json
 get_refresh_token*.py
+xcuserdata/

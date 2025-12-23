@@ -24,6 +24,10 @@ struct ImportedRecipe: Codable, Identifiable {
     let instructions: String // This is a single String in the main app
     let servings: Int
     let prepTimeMinutes: Int
+    let cookTimeMinutes: Int?  // Optional - may not be available
+    let totalTimeMinutes: Int?  // Optional - may not be available
+    let difficulty: String?  // Optional - "Easy", "Medium", "Hard", "Expert"
+    let yieldDescription: String?  // Optional - "Makes 12 cookies", "2 deep dish pizzas"
     let imageUrl: String?
     
     // Raw Spoonacular data for better conversion
@@ -41,7 +45,7 @@ struct ImportedRecipe: Codable, Identifiable {
     let author: String?
     let authorUrl: String?
     
-    init(title: String, sourceUrl: String, ingredients: [String], instructions: String, servings: Int, prepTimeMinutes: Int, imageUrl: String? = nil, rawIngredients: [String] = [], rawInstructions: String = "", extractedNutrition: NutritionInfo? = nil, nutritionSource: String? = nil, aiEnhanced: Bool = false, author: String? = nil, authorUrl: String? = nil) {
+    init(title: String, sourceUrl: String, ingredients: [String], instructions: String, servings: Int, prepTimeMinutes: Int, cookTimeMinutes: Int? = nil, totalTimeMinutes: Int? = nil, difficulty: String? = nil, yieldDescription: String? = nil, imageUrl: String? = nil, rawIngredients: [String] = [], rawInstructions: String = "", extractedNutrition: NutritionInfo? = nil, nutritionSource: String? = nil, aiEnhanced: Bool = false, author: String? = nil, authorUrl: String? = nil) {
         self.id = UUID()
         self.title = title
         self.sourceUrl = sourceUrl
@@ -49,6 +53,10 @@ struct ImportedRecipe: Codable, Identifiable {
         self.instructions = instructions
         self.servings = servings
         self.prepTimeMinutes = prepTimeMinutes
+        self.cookTimeMinutes = cookTimeMinutes
+        self.totalTimeMinutes = totalTimeMinutes
+        self.difficulty = difficulty
+        self.yieldDescription = yieldDescription
         self.imageUrl = imageUrl
         self.rawIngredients = rawIngredients
         self.rawInstructions = rawInstructions
@@ -67,6 +75,13 @@ struct ImportedRecipe: Codable, Identifiable {
         case ingredients, instructions, servings
         case prepTimeMinutes = "prep_time_minutes"
         case prepTime = "prep_time"
+        case cookTimeMinutes = "cook_time_minutes"
+        case cookTime = "cook_time"
+        case totalTimeMinutes = "total_time_minutes"
+        case totalTime = "total_time"
+        case difficulty
+        case yieldDescription = "yield_description"
+        case yields
         case imageUrl = "image_url"
         case image
         case rawIngredients, rawInstructions
@@ -101,6 +116,40 @@ struct ImportedRecipe: Codable, Identifiable {
         } else {
             prepTimeMinutes = 0
         }
+        
+        // Parse cook time
+        if let cookTime = try? container.decode(Int.self, forKey: .cookTimeMinutes) {
+            cookTimeMinutes = cookTime
+        } else if let cookTime = try? container.decodeIfPresent(Int.self, forKey: .cookTime) {
+            cookTimeMinutes = cookTime
+        } else {
+            cookTimeMinutes = nil
+        }
+        
+        // Parse total time
+        if let totalTime = try? container.decode(Int.self, forKey: .totalTimeMinutes) {
+            totalTimeMinutes = totalTime
+        } else if let totalTime = try? container.decodeIfPresent(Int.self, forKey: .totalTime) {
+            totalTimeMinutes = totalTime
+        } else {
+            totalTimeMinutes = nil
+        }
+        
+        // Parse difficulty
+        difficulty = try? container.decodeIfPresent(String.self, forKey: .difficulty)
+        
+        // Parse yield description - use temporary variable since it's let
+        var parsedYieldDescription: String? = try? container.decodeIfPresent(String.self, forKey: .yieldDescription)
+        if parsedYieldDescription == nil {
+            // Try yields field as fallback
+            if let yieldsStr = try? container.decodeIfPresent(String.self, forKey: .yields),
+               !yieldsStr.isEmpty,
+               yieldsStr.lowercased().contains("makes") || yieldsStr.lowercased().contains("cookies") || yieldsStr.lowercased().contains("pizzas") {
+                parsedYieldDescription = yieldsStr
+            }
+        }
+        yieldDescription = parsedYieldDescription
+        
         imageUrl = (try? container.decodeIfPresent(String.self, forKey: .imageUrl)) ?? (try? container.decodeIfPresent(String.self, forKey: .image))
         rawIngredients = (try? container.decode([String].self, forKey: .rawIngredients)) ?? []
         rawInstructions = (try? container.decode(String.self, forKey: .rawInstructions)) ?? ""
@@ -199,6 +248,10 @@ struct ImportedRecipe: Codable, Identifiable {
         try container.encode(instructions, forKey: .instructions)
         try container.encode(servings, forKey: .servings)
         try container.encode(prepTimeMinutes, forKey: .prepTimeMinutes)
+        try container.encodeIfPresent(cookTimeMinutes, forKey: .cookTimeMinutes)
+        try container.encodeIfPresent(totalTimeMinutes, forKey: .totalTimeMinutes)
+        try container.encodeIfPresent(difficulty, forKey: .difficulty)
+        try container.encodeIfPresent(yieldDescription, forKey: .yieldDescription)
         try container.encodeIfPresent(imageUrl, forKey: .imageUrl)
         try container.encode(rawIngredients, forKey: .rawIngredients)
         try container.encode(rawInstructions, forKey: .rawInstructions)

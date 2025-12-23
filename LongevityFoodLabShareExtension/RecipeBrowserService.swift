@@ -64,15 +64,37 @@ class RecipeBrowserService: NSObject, ObservableObject {
         // Store completion handler
         self.extractionCompletionHandler = completion
         
-        // Fetch HTML first, then send to Lambda
+        // Fetch HTML first, then check for print page
         fetchHTML(from: url) { [weak self] htmlResult in
+            guard let self = self else { return }
+            
             switch htmlResult {
             case .success(let html):
-                self?.sendToLambdaWithHTML(url: url.absoluteString, html: html, completion: completion)
+                // Check for print recipe page
+                if let printURL = self.detectPrintRecipeURL(in: html, baseURL: url) {
+                    print("🖨️ SE/RecipeBrowserService: Print page detected, fetching...")
+                    // Fetch print page HTML
+                    self.fetchPrintPageHTML(from: printURL) { printResult in
+                        switch printResult {
+                        case .success(let printHTML):
+                            print("✅ SE/RecipeBrowserService: Using print page HTML (length: \(printHTML.count))")
+                            // Send print page HTML to Lambda (smaller, cleaner payload)
+                            self.sendToLambdaWithHTML(url: url.absoluteString, html: printHTML, completion: completion)
+                        case .failure(let printError):
+                            print("⚠️ SE/RecipeBrowserService: Print page fetch failed: \(printError.localizedDescription), falling back to main HTML")
+                            // Fallback to main page HTML if print page fetch fails
+                            self.sendToLambdaWithHTML(url: url.absoluteString, html: html, completion: completion)
+                        }
+                    }
+                } else {
+                    // No print page found, use main HTML
+                    print("ℹ️ SE/RecipeBrowserService: No print page found, using main HTML")
+                    self.sendToLambdaWithHTML(url: url.absoluteString, html: html, completion: completion)
+                }
             case .failure(let error):
                 print("SE/NET: html-fetch error=\(error.localizedDescription)")
                 // Try to extract basic metadata from URL for fallback
-                self?.extractBasicMetadataFromURL(url, completion: completion)
+                self.extractBasicMetadataFromURL(url, completion: completion)
             }
         }
     }
@@ -193,6 +215,124 @@ class RecipeBrowserService: NSObject, ObservableObject {
             }
             
             print("SE/NET: html-fetch ok status=\(httpResponse.statusCode) bytes=\(data.count)")
+            completion(.success(html))
+        }.resume()
+    }
+    
+    // MARK: - Print Recipe Page Detection & Fetching
+    
+    /// Detects print recipe page URL from HTML content
+    /// Searches for common print link patterns and returns absolute URL if found
+    private func detectPrintRecipeURL(in html: String, baseURL: URL) -> URL? {
+        print("🔍 SE/RecipeBrowserService: Detecting print recipe URL...")
+        
+        // Pattern 1: href with print in path (case-insensitive)
+        // Matches: <a href="/print/">, <a href="?print=true">, <a href="/recipe/123/print/">
+        let hrefPattern = #"href=["']([^"']*print[^"']*)["']"#
+        if let regex = try? NSRegularExpression(pattern: hrefPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let hrefRange = Range(match.range(at: 1), in: html)!
+            var printPath = String(html[hrefRange])
+            
+            // Clean up the path (remove query params if it's a print parameter)
+            if printPath.contains("?print=") || printPath.contains("&print=") {
+                // This is a query parameter, not a path - skip it
+            } else {
+                // Resolve relative URL
+                if let printURL = URL(string: printPath, relativeTo: baseURL) {
+                    print("✅ SE/RecipeBrowserService: Found print URL via href: \(printURL.absoluteString)")
+                    return printURL
+                }
+            }
+        }
+        
+        // Pattern 2: data-print-url attribute
+        // Matches: <button data-print-url="/print/">Print</button>
+        let dataPrintPattern = #"data-print-url=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: dataPrintPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let urlRange = Range(match.range(at: 1), in: html)!
+            let printPath = String(html[urlRange])
+            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+                print("✅ SE/RecipeBrowserService: Found print URL via data-print-url: \(printURL.absoluteString)")
+                return printURL
+            }
+        }
+        
+        // Pattern 3: link rel="alternate" media="print"
+        // Matches: <link rel="alternate" media="print" href="/print/">
+        let linkPattern = #"<link[^>]*rel=["']alternate["'][^>]*media=["']print["'][^>]*href=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: linkPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let hrefRange = Range(match.range(at: 1), in: html)!
+            let printPath = String(html[hrefRange])
+            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+                print("✅ SE/RecipeBrowserService: Found print URL via link rel: \(printURL.absoluteString)")
+                return printURL
+            }
+        }
+        
+        // Pattern 4: Common print URL patterns in href (more specific)
+        // Check for /print/, /print-recipe/, /recipe/{id}/print/ patterns
+        let specificPattern = #"href=["']([^"']*(?:/print[/?]|/print-recipe[/?]|/recipe/[^/]+/print[/?]))"#
+        if let regex = try? NSRegularExpression(pattern: specificPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let hrefRange = Range(match.range(at: 1), in: html)!
+            var printPath = String(html[hrefRange])
+            // Remove trailing ? if present
+            if printPath.hasSuffix("?") {
+                printPath = String(printPath.dropLast())
+            }
+            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+                print("✅ SE/RecipeBrowserService: Found print URL via specific pattern: \(printURL.absoluteString)")
+                return printURL
+            }
+        }
+        
+        print("⚠️ SE/RecipeBrowserService: No print recipe URL found")
+        return nil
+    }
+    
+    /// Fetches HTML from print recipe page
+    /// Uses same configuration as fetchHTML but specifically for print pages
+    private func fetchPrintPageHTML(from url: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        print("🖨️ SE/RecipeBrowserService: Fetching print page HTML from \(url.absoluteString)")
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 8
+        config.waitsForConnectivity = false
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        
+        let session = URLSession(configuration: config)
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        
+        session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("⚠️ SE/RecipeBrowserService: Print page fetch error: \(error.localizedDescription)")
+                completion(.failure(error))
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("⚠️ SE/RecipeBrowserService: Print page invalid response")
+                completion(.failure(NSError(domain: "InvalidResponse", code: -1, userInfo: nil)))
+                return
+            }
+            
+            guard let data = data, let html = String(data: data, encoding: .utf8) else {
+                print("⚠️ SE/RecipeBrowserService: Print page no data")
+                completion(.failure(NSError(domain: "NoData", code: -1, userInfo: nil)))
+                return
+            }
+            
+            print("✅ SE/RecipeBrowserService: Print page fetched successfully - status=\(httpResponse.statusCode) bytes=\(data.count)")
             completion(.success(html))
         }.resume()
     }
@@ -454,9 +594,36 @@ class RecipeBrowserService: NSObject, ObservableObject {
             
             // DEBUG: Log Lambda servings response
             let servingsRaw = json["servings"]
+            let yieldsRaw = json["yields"]
             print("🍽️ Lambda returned servings (raw): \(servingsRaw ?? "nil")")
-            let servings = (json["servings"] as? Int) ?? (json["servings"] as? String).flatMap { Int($0) } ?? 1
-            print("🍽️ Parsed servings value: \(servings) (default: 1 if not found)")
+            print("🍽️ Lambda returned yields (raw): \(yieldsRaw ?? "nil")")
+            
+            // Enhanced servings parsing - handles ranges, text, yields
+            var servings: Int = 4  // Default to 4 (more common than 1)
+            var yieldDescription: String? = nil
+            
+            // First, try to parse from servings field
+            if let servingsInt = json["servings"] as? Int {
+                servings = servingsInt
+            } else if let servingsStr = json["servings"] as? String, !servingsStr.isEmpty {
+                servings = parseServings(from: servingsStr)
+            }
+            
+            // If servings is still default or invalid, try yields field
+            if servings <= 0 || servings == 4 {
+                if let yieldsStr = json["yields"] as? String, !yieldsStr.isEmpty {
+                    let parsed = parseServings(from: yieldsStr)
+                    if parsed > 0 {
+                        servings = parsed
+                        // If yields contains descriptive text, save it
+                        if yieldsStr.lowercased().contains("makes") || yieldsStr.lowercased().contains("cookies") || yieldsStr.lowercased().contains("pizzas") {
+                            yieldDescription = yieldsStr
+                        }
+                    }
+                }
+            }
+            
+            print("🍽️ Parsed servings value: \(servings) (default: 4 if not found)")
             
             // Handle ingredients - could be array of strings
             var ingredients: [String] = []
@@ -528,6 +695,37 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 prepTimeMinutes = prepTimeInt
             } else if let prepTimeStr = json["prep_time"] as? String {
                 prepTimeMinutes = parseTimeToMinutes(prepTimeStr)
+            }
+            
+            // Handle cook time - Lambda can return as Int (cook_time_minutes) or Int/String (cook_time)
+            var cookTimeMinutes: Int? = nil
+            if let cookTimeInt = json["cook_time_minutes"] as? Int {
+                cookTimeMinutes = cookTimeInt
+            } else if let cookTimeInt = json["cook_time"] as? Int {
+                cookTimeMinutes = cookTimeInt
+            } else if let cookTimeStr = json["cook_time"] as? String, !cookTimeStr.isEmpty {
+                let parsed = parseTimeToMinutes(cookTimeStr)
+                cookTimeMinutes = parsed > 0 ? parsed : nil
+            }
+            
+            // Handle total time - Lambda can return as Int (total_time_minutes) or Int/String (total_time)
+            var totalTimeMinutes: Int? = nil
+            if let totalTimeInt = json["total_time_minutes"] as? Int {
+                totalTimeMinutes = totalTimeInt
+            } else if let totalTimeInt = json["total_time"] as? Int {
+                totalTimeMinutes = totalTimeInt
+            } else if let totalTimeStr = json["total_time"] as? String, !totalTimeStr.isEmpty {
+                let parsed = parseTimeToMinutes(totalTimeStr)
+                totalTimeMinutes = parsed > 0 ? parsed : nil
+            }
+            
+            // If total time not available, calculate from prep + cook
+            if totalTimeMinutes == nil && prepTimeMinutes > 0 {
+                if let cookTime = cookTimeMinutes {
+                    totalTimeMinutes = prepTimeMinutes + cookTime
+                } else {
+                    totalTimeMinutes = prepTimeMinutes
+                }
             }
             
             // Handle image URL - check both possible field names
@@ -609,6 +807,9 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 print("✅ RecipeBrowserService: Extracted nutrition from recipe page - \(caloriesStr) calories, calcium: \(calciumFormatted)")
             }
             
+            // Parse difficulty from Lambda response (if available)
+            let difficulty = json["difficulty"] as? String
+            
             // Create ImportedRecipe with mapped fields
             let recipe = ImportedRecipe(
                 title: title,
@@ -617,6 +818,10 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 instructions: instructions,
                 servings: servings,
                 prepTimeMinutes: prepTimeMinutes,
+                cookTimeMinutes: cookTimeMinutes,
+                totalTimeMinutes: totalTimeMinutes,
+                difficulty: difficulty,
+                yieldDescription: yieldDescription,
                 imageUrl: imageUrl,
                 rawIngredients: ingredients,
                 rawInstructions: instructions,
@@ -670,19 +875,125 @@ class RecipeBrowserService: NSObject, ObservableObject {
     }
     
     // Helper function to parse time strings to minutes
+    // Handles multiple formats: "15 minutes", "1 hour 30 minutes", "1h 30m", "1.5 hours", "PT1H30M"
     private func parseTimeToMinutes(_ timeStr: String) -> Int {
-        let lowercased = timeStr.lowercased()
+        let lowercased = timeStr.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Handle ISO 8601 duration format: PT1H30M, PT45M, etc.
+        if lowercased.hasPrefix("pt") {
+            var hours = 0
+            var minutes = 0
+            
+            // Extract hours: PT1H30M -> 1
+            if let hourRange = lowercased.range(of: #"(\d+)h"#, options: .regularExpression) {
+                let hourStr = String(lowercased[hourRange])
+                if let hourValue = Int(hourStr.replacingOccurrences(of: "h", with: "", options: .caseInsensitive)) {
+                    hours = hourValue
+                }
+            }
+            
+            // Extract minutes: PT1H30M -> 30
+            if let minRange = lowercased.range(of: #"(\d+)m"#, options: .regularExpression) {
+                let minStr = String(lowercased[minRange])
+                if let minValue = Int(minStr.replacingOccurrences(of: "m", with: "", options: .caseInsensitive)) {
+                    minutes = minValue
+                }
+            }
+            
+            return hours * 60 + minutes
+        }
+        
+        // Handle formats with both hours and minutes: "1 hour 30 minutes", "1h 30m", "2 hrs 15 mins"
+        let hoursMinutesPattern = #"(\d+(?:\.\d+)?)\s*(?:hour|hr|hrs|h)(?:\s+(\d+)\s*(?:minute|min|mins|m))?"#
+        if let regex = try? NSRegularExpression(pattern: hoursMinutesPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: lowercased, options: [], range: NSRange(location: 0, length: lowercased.utf16.count)),
+           match.numberOfRanges > 1 {
+            
+            // Extract hours (may be decimal)
+            let hoursRange = Range(match.range(at: 1), in: lowercased)!
+            let hoursStr = String(lowercased[hoursRange])
+            let hours = Double(hoursStr) ?? 0
+            
+            // Extract minutes if present
+            var minutes = 0
+            if match.numberOfRanges > 2 && match.range(at: 2).location != NSNotFound {
+                let minutesRange = Range(match.range(at: 2), in: lowercased)!
+                let minutesStr = String(lowercased[minutesRange])
+                minutes = Int(minutesStr) ?? 0
+            }
+            
+            return Int(hours * 60) + minutes
+        }
+        
+        // Handle formats with only minutes: "15 minutes", "90 min", "45 mins"
+        let minutesPattern = #"(\d+)\s*(?:minute|min|mins|m)"#
+        if let regex = try? NSRegularExpression(pattern: minutesPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: lowercased, options: [], range: NSRange(location: 0, length: lowercased.utf16.count)),
+           match.numberOfRanges > 1 {
+            let minutesRange = Range(match.range(at: 1), in: lowercased)!
+            let minutesStr = String(lowercased[minutesRange])
+            return Int(minutesStr) ?? 0
+        }
+        
+        // Handle formats with only hours: "2 hours", "1.5 hrs", "3h"
+        let hoursPattern = #"(\d+(?:\.\d+)?)\s*(?:hour|hr|hrs|h)"#
+        if let regex = try? NSRegularExpression(pattern: hoursPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: lowercased, options: [], range: NSRange(location: 0, length: lowercased.utf16.count)),
+           match.numberOfRanges > 1 {
+            let hoursRange = Range(match.range(at: 1), in: lowercased)!
+            let hoursStr = String(lowercased[hoursRange])
+            let hours = Double(hoursStr) ?? 0
+            return Int(hours * 60)
+        }
+        
+        // Fallback: extract any number and assume minutes if no unit found
         let numbers = lowercased.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-        
-        guard let value = Int(numbers) else { return 0 }
-        
-        if lowercased.contains("hour") || lowercased.contains("hr") {
-            return value * 60
-        } else if lowercased.contains("minute") || lowercased.contains("min") {
+        if let value = Int(numbers), value > 0 {
             return value
         }
         
-        return value // Default assume minutes
+        return 0
+    }
+    
+    // Helper function to parse servings from text
+    // Handles formats: "Serves 4", "Serves 4-6", "Makes 12 cookies", "Yield: 8", "4 servings"
+    private func parseServings(from text: String) -> Int {
+        let lowercased = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Pattern to match: (serves|makes|yield|servings)[:\s]*(\d+)(?:-(\d+))?
+        // Handles: "Serves 4", "Serves 4-6", "Makes 12 cookies", "Yield: 8", "4 servings"
+        let pattern = #"(?i)(serves|makes|yield|servings)[:\s]*(\d+)(?:-(\d+))?"#
+        
+        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+           let match = regex.firstMatch(in: lowercased, options: [], range: NSRange(location: 0, length: lowercased.utf16.count)),
+           match.numberOfRanges > 2 {
+            
+            // Extract first number (lower bound)
+            let firstNumberRange = Range(match.range(at: 2), in: lowercased)!
+            let firstNumberStr = String(lowercased[firstNumberRange])
+            guard let firstNumber = Int(firstNumberStr) else { return 0 }
+            
+            // If there's a range (e.g., "4-6"), extract second number
+            if match.numberOfRanges > 3 && match.range(at: 3).location != NSNotFound {
+                let secondNumberRange = Range(match.range(at: 3), in: lowercased)!
+                let secondNumberStr = String(lowercased[secondNumberRange])
+                if let secondNumber = Int(secondNumberStr) {
+                    // Use lower bound (more conservative)
+                    // Could also use average: (firstNumber + secondNumber) / 2
+                    return firstNumber
+                }
+            }
+            
+            return firstNumber
+        }
+        
+        // Fallback: extract any number from the text
+        let numbers = lowercased.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        if let value = Int(numbers), value > 0 {
+            return value
+        }
+        
+        return 0
     }
     
 }

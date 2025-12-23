@@ -275,6 +275,18 @@ class RecipeBrowserService: NSObject, ObservableObject {
             prepTime = 0
         }
         
+        // Parse cook time (optional)
+        let cookTime: Int? = (data["cook_time"] as? Int) ?? nil
+        
+        // Parse total time (optional)
+        let totalTime: Int? = (data["total_time"] as? Int) ?? nil
+        
+        // Parse difficulty (optional)
+        let difficulty: String? = data["difficulty"] as? String
+        
+        // Parse yield description (optional)
+        let yieldDescription: String? = data["yields"] as? String
+        
         // Parse servings - handle both string and int formats
         let servings: Int
         if let servingsInt = data["servings"] as? Int {
@@ -282,9 +294,9 @@ class RecipeBrowserService: NSObject, ObservableObject {
         } else if let yieldsString = data["yields"] as? String {
             // Extract number from yields string like "12"
             let numbers = yieldsString.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
-            servings = numbers.first ?? 1
+            servings = numbers.first ?? 4  // Default to 4 instead of 1
         } else {
-            servings = 1
+            servings = 4  // Default to 4 instead of 1
         }
         
         // Convert instructions to the expected format
@@ -299,6 +311,10 @@ class RecipeBrowserService: NSObject, ObservableObject {
             instructions: formattedInstructions,
             servings: servings,
             prepTimeMinutes: prepTime,
+            cookTimeMinutes: cookTime,
+            totalTimeMinutes: totalTime,
+            difficulty: difficulty,
+            yieldDescription: yieldDescription,
             imageUrl: imageURL,
             rawIngredients: ingredients,
             rawInstructions: formattedInstructions

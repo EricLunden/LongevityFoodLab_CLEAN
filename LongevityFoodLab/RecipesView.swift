@@ -2284,34 +2284,13 @@ struct RecipeDetailView: View {
                                     .foregroundColor(.secondary)
                             }
                             
-                            HStack(spacing: 12) {
-                                // Only show prep time if valid (1-600 minutes)
-                                if currentRecipe.prepTime > 0 && currentRecipe.prepTime <= 600 {
-                                    Label("\(currentRecipe.prepTimeFormatted)", systemImage: "clock")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                if currentRecipe.cookTime > 0 {
-                                    Label("\(currentRecipe.cookTimeFormatted)", systemImage: "flame")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                // Only show servings if valid (2-50)
-                                if currentRecipe.servings >= 2 && currentRecipe.servings <= 50 {
-                                    // Calculate scaled servings
-                                    let scaledServings = Int(round(Double(currentRecipe.servings) * scaleFactor))
-                                    let servingsText = scaleFactor != 1.0 
-                                        ? "\(scaledServings) serving\(scaledServings == 1 ? "" : "s") (Scaled)"
-                                        : "\(currentRecipe.servings) serving\(currentRecipe.servings == 1 ? "" : "s")"
-                                    
-                                    Label(servingsText, systemImage: "person.2")
+                            // Text-based metadata display
+                            if !currentRecipe.formattedMetadataString().isEmpty {
+                                Text(currentRecipe.formattedMetadataString())
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.vertical, 16)
                         .padding(.horizontal, 20)

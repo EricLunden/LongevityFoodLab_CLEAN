@@ -56,6 +56,9 @@ struct Recipe: Codable, Identifiable, Equatable {
     // AI enhancement flag (instructions were AI-generated)
     var aiEnhanced: Bool = false
     
+    // Recipe difficulty level (optional)
+    var difficulty: String?  // Optional - "Easy", "Medium", "Hard", "Expert"
+    
     init(
         id: UUID = UUID(),
         title: String,
@@ -91,7 +94,8 @@ struct Recipe: Codable, Identifiable, Equatable {
         unitSystem: UnitSystem = .us,
         extractedNutrition: NutritionInfo? = nil,
         nutritionSource: String? = nil,
-        aiEnhanced: Bool = false
+        aiEnhanced: Bool = false,
+        difficulty: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -128,6 +132,7 @@ struct Recipe: Codable, Identifiable, Equatable {
         self.extractedNutrition = extractedNutrition
         self.nutritionSource = nutritionSource
         self.aiEnhanced = aiEnhanced
+        self.difficulty = difficulty
     }
     
     // MARK: - Codable Implementation
@@ -141,7 +146,7 @@ struct Recipe: Codable, Identifiable, Equatable {
         case mealTypeHints, spoonacularID
         case dateAdded, lastModified, isFavorite, recipeFingerprint
         case analysisType, isOriginal, improvedVersionID, scaleFactor, unitSystem
-        case extractedNutrition, nutritionSource, aiEnhanced
+        case extractedNutrition, nutritionSource, aiEnhanced, difficulty
     }
     
     // Custom decoder to handle missing scaleFactor and old customCategory in old recipes
@@ -193,6 +198,9 @@ struct Recipe: Codable, Identifiable, Equatable {
         // Handle extracted nutrition (optional, for backward compatibility)
         extractedNutrition = try container.decodeIfPresent(NutritionInfo.self, forKey: .extractedNutrition)
         nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource)
+        
+        // Handle difficulty (optional, for backward compatibility)
+        difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty)
     }
     
     // Custom encoder to only encode customCategories (not the old customCategory key)
@@ -230,6 +238,7 @@ struct Recipe: Codable, Identifiable, Equatable {
         try container.encode(unitSystem, forKey: .unitSystem)
         try container.encodeIfPresent(extractedNutrition, forKey: .extractedNutrition)
         try container.encodeIfPresent(nutritionSource, forKey: .nutritionSource)
+        try container.encodeIfPresent(difficulty, forKey: .difficulty)
     }
     
     // MARK: - Computed Properties
@@ -268,6 +277,63 @@ struct Recipe: Codable, Identifiable, Equatable {
         } else {
             return "\(minutes)m"
         }
+    }
+    
+    /// Formats recipe metadata as text: "Prep 16 min • Cook 16 min • Servings Yield: 4"
+    /// Handles missing fields gracefully and uses appropriate time formatting
+    func formattedMetadataString() -> String {
+        var components: [String] = []
+        
+        // Format prep time
+        if prepTime > 0 && prepTime <= 600 {
+            let hours = prepTime / 60
+            let minutes = prepTime % 60
+            
+            if hours > 0 {
+                if minutes > 0 {
+                    components.append("Prep \(hours) hr \(minutes) min")
+                } else {
+                    components.append("Prep \(hours) hr")
+                }
+            } else {
+                components.append("Prep \(minutes) min")
+            }
+        }
+        
+        // Format cook time
+        if cookTime > 0 {
+            let hours = cookTime / 60
+            let minutes = cookTime % 60
+            
+            if hours > 0 {
+                if minutes > 0 {
+                    components.append("Cook \(hours) hr \(minutes) min")
+                } else {
+                    components.append("Cook \(hours) hr")
+                }
+            } else {
+                components.append("Cook \(minutes) min")
+            }
+        }
+        
+        // Format servings
+        if servings >= 2 && servings <= 50 {
+            // Calculate scaled servings if scale factor is applied
+            let scaledServings = Int(round(Double(servings) * scaleFactor))
+            if scaleFactor != 1.0 {
+                components.append("Servings \(scaledServings) (Scaled)")
+            } else {
+                components.append("Servings \(servings)")
+            }
+        }
+        
+        // Format difficulty
+        if let difficulty = difficulty, !difficulty.isEmpty {
+            components.append("Difficulty \(difficulty)")
+        }
+        
+        // Join components with bullet separator
+        return components.joined(separator: " • ")
     }
     
     var hasAnalysis: Bool {

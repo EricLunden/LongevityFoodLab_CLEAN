@@ -296,22 +296,9 @@ struct RecipeSearchCard: View {
             }
             
             HStack {
-                // Only show prep time if valid (1-600 minutes)
-                if recipe.prepTime > 0 && recipe.prepTime <= 600 {
-                    Label("\(recipe.prepTimeFormatted)", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                if recipe.cookTime > 0 {
-                    Label("\(recipe.cookTimeFormatted)", systemImage: "flame")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Only show servings if valid (2-50)
-                if recipe.servings >= 2 && recipe.servings <= 50 {
-                    Label("\(recipe.servings) serving\(recipe.servings == 1 ? "" : "s")", systemImage: "person.2")
+                // Text-based metadata display
+                if !recipe.formattedMetadataString().isEmpty {
+                    Text(recipe.formattedMetadataString())
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

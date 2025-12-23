@@ -134,20 +134,12 @@ struct RecipePreviewView: View {
                                     .transition(.opacity)
                             }
                             
-                            HStack {
-                                // Only show prep time if valid (1-600 minutes)
-                                if loadingState.prepTimeMinutes > 0 && loadingState.prepTimeMinutes <= 600 {
-                                    Label(formatPrepTime(loadingState.prepTimeMinutes), systemImage: "clock")
-                                        .font(.subheadline)
-                                        .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.7) : .secondary)
-                                }
-                                
-                                // Only show servings if valid (2-50)
-                                if loadingState.servings > 0 && loadingState.servings >= 2 && loadingState.servings <= 50 {
-                                    Label("\(loadingState.servings) serving\(loadingState.servings == 1 ? "" : "s")", systemImage: "person.2")
-                                        .font(.subheadline)
-                                        .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.7) : .secondary)
-                                }
+                            // Text-based metadata display
+                            if !loadingState.formattedMetadataString().isEmpty {
+                                Text(loadingState.formattedMetadataString())
+                                    .font(.subheadline)
+                                    .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.7) : .secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         .padding(.vertical, 16)

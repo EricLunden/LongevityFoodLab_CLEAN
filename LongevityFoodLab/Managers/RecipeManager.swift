@@ -277,7 +277,7 @@ class RecipeManager: ObservableObject, @unchecked Sendable {
             image: (importedRecipe.imageUrl?.isEmpty == false) ? importedRecipe.imageUrl : nil, // Convert empty string to nil for proper image display
             rating: 0.0,
             prepTime: importedRecipe.prepTimeMinutes,
-            cookTime: 0, // We don't have cook time from import
+            cookTime: importedRecipe.cookTimeMinutes ?? 0, // Use cook time from import if available
             servings: importedRecipe.servings,
             categories: [], // Will be determined by AI analysis
             description: "", // Don't put image URL in description
@@ -294,7 +294,8 @@ class RecipeManager: ObservableObject, @unchecked Sendable {
             isOriginal: false,
             extractedNutrition: importedRecipe.extractedNutrition,
             nutritionSource: importedRecipe.nutritionSource,
-            aiEnhanced: importedRecipe.aiEnhanced
+            aiEnhanced: importedRecipe.aiEnhanced,
+            difficulty: importedRecipe.difficulty
         )
         
         // Log if extracted nutrition is available

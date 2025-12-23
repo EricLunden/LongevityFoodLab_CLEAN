@@ -16,52 +16,60 @@ struct RecipeRemoteImage: View {
     }
 
     var body: some View {
-        Group {
-            if let img = uiImage {
-                Image(uiImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)  // Fill entire frame
-                    .frame(maxWidth: .infinity)  // Fill available width
-                    .frame(height: 200)
-                    .clipped()  // Crop to fill rectangle (no letterboxing)
-                    .contentShape(Rectangle())
-                    .cornerRadius(12)
-            } else if isLoading {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 200)
-                    .overlay(ProgressView())
-            } else if let err = loadError {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 200)
-                    .overlay(
-                        VStack(spacing: 6) {
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                            Text("Image failed")
-                                .font(.footnote)
-                                .foregroundColor(.gray)
-                            Text(err)
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 8)
-                        }
-                    )
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-                    .frame(height: 200)
-                    .onAppear { fetch() }
+        // Constrain container from the start to prevent zoom effect
+        // Use GeometryReader to get exact available width and prevent any expansion
+        GeometryReader { geometry in
+            Group {
+                if let img = uiImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)  // Fill entire frame
+                        .frame(width: geometry.size.width, height: 200)  // Use exact width from GeometryReader
+                        .clipped()  // Crop to fill rectangle (no letterboxing)
+                        .cornerRadius(12)
+                        .contentShape(Rectangle())
+                } else if isLoading {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .overlay(ProgressView())
+                } else if let err = loadError {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .overlay(
+                            VStack(spacing: 6) {
+                                Image(systemName: "photo")
+                                    .font(.title2)
+                                    .foregroundColor(.gray)
+                                Text("Image failed")
+                                    .font(.footnote)
+                                    .foregroundColor(.gray)
+                                Text(err)
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 8)
+                            }
+                        )
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.15))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .onAppear { fetch() }
+                }
             }
+            .frame(width: geometry.size.width)  // Constrain Group to exact width
+            .clipped()  // Prevent overflow
         }
+        .frame(height: 200)  // Fixed height for GeometryReader
         .onAppear {
             if uiImage == nil && !isLoading { fetch() }
         }
-        .clipped()
     }
 
     private func fetch() {
@@ -89,33 +97,10 @@ struct RecipeRemoteImage: View {
 
         let session = URLSession(configuration: config)
 
-        // HEAD check (optional) to fail fast on huge assets
-        var headReq = URLRequest(url: url)
-        headReq.httpMethod = "HEAD"
-        headReq.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
-
-        let headTask = session.dataTask(with: headReq) { _, response, error in
-            if let error = error {
-                print("IMG: HEAD error \(urlString) err=\(error.localizedDescription)")
-                // Continue anyway; some CDNs block HEAD
-                self.download(session: session, url: url)
-                return
-            }
-            if let http = response as? HTTPURLResponse {
-                if let lenStr = http.allHeaderFields["Content-Length"] as? String,
-                   let len = Int64(lenStr), len > 10_000_000 {
-                    // >10 MB guard
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-                        self.loadError = "Image too large"
-                    }
-                    print("IMG: too large \(urlString) size=\(len)")
-                    return
-                }
-            }
-            self.download(session: session, url: url)
-        }
-        headTask.resume()
+        // Skip HEAD request for faster loading - go straight to download
+        // HEAD requests can cause delays, especially on Bon Appetit/Delish
+        // Size check will happen during download instead
+        self.download(session: session, url: url)
     }
 
     private func download(session: URLSession, url: URL) {

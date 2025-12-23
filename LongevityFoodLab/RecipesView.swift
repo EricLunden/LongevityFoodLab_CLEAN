@@ -2403,6 +2403,8 @@ struct RecipeDetailView: View {
                                 .padding(.top, 3)  // 3pt spacing from dropdowns above
                                 .padding(.bottom, 3)  // 3pt spacing to Ingredients header below
                             }
+                            .frame(maxWidth: .infinity)  // Constrain outer VStack width
+                            .clipped()  // Prevent any overflow
                             .padding(.horizontal, 20)
                         }
                         

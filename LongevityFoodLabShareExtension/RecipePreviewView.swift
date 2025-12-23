@@ -170,10 +170,6 @@ struct RecipePreviewView: View {
                                     if USE_CUSTOM_IMAGE_LOADER {
                                     // Custom loader path (feature-flagged)
                                             RecipeRemoteImage(urlString: fixedImageUrl, isShorts: isShorts)
-                                                .frame(maxWidth: .infinity)  // Fill container width
-                                        .frame(height: 200)
-                                        .cornerRadius(12)
-                                        .clipped()
                                 } else {
                                     // AsyncImage with diagnostics
                                     if let u = URL(string: fixedImageUrl) {

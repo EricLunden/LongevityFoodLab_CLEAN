@@ -243,6 +243,49 @@ class RecipeBrowserService: NSObject, ObservableObject {
     
     // MARK: - Print Recipe Page Detection & Fetching
     
+    /// Validates if a URL is actually a recipe print page (not an asset file)
+    private func isValidPrintPageURL(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        
+        // Reject non-HTML file extensions
+        let nonHTMLExtensions = [".svg", ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".woff", ".woff2", ".ttf", ".eot", ".json", ".xml"]
+        for ext in nonHTMLExtensions {
+            if path.hasSuffix(ext) {
+                print("⚠️ SE/RecipeBrowserService: Rejected non-HTML file: \(url.absoluteString)")
+                return false
+            }
+        }
+        
+        // Reject URLs in asset/static directories (unless they're actual print pages)
+        let assetPaths = ["/static/", "/assets/", "/icons/", "/images/", "/img/", "/css/", "/js/", "/fonts/"]
+        for assetPath in assetPaths {
+            if path.contains(assetPath) && !path.contains("/print") {
+                print("⚠️ SE/RecipeBrowserService: Rejected asset directory URL: \(url.absoluteString)")
+                return false
+            }
+        }
+        
+        // Reject URLs that are just fragments (like #print in SVG sprites)
+        if url.fragment != nil && path.isEmpty {
+            print("⚠️ SE/RecipeBrowserService: Rejected fragment-only URL: \(url.absoluteString)")
+            return false
+        }
+        
+        // Accept URLs that contain /print/ in the path (most reliable indicator)
+        if path.contains("/print") {
+            return true
+        }
+        
+        // Accept URLs that end with /print or /print-recipe
+        if path.hasSuffix("/print") || path.hasSuffix("/print-recipe") {
+            return true
+        }
+        
+        // Reject everything else (too risky)
+        print("⚠️ SE/RecipeBrowserService: Rejected - doesn't match print page pattern: \(url.absoluteString)")
+        return false
+    }
+    
     /// Detects print recipe page URL from HTML content
     /// Searches for common print link patterns and returns absolute URL if found
     private func detectPrintRecipeURL(in html: String, baseURL: URL) -> URL? {
@@ -262,7 +305,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 // This is a query parameter, not a path - skip it
             } else {
                 // Resolve relative URL
-                if let printURL = URL(string: printPath, relativeTo: baseURL) {
+                if let printURL = URL(string: printPath, relativeTo: baseURL), isValidPrintPageURL(printURL) {
                     print("✅ SE/RecipeBrowserService: Found print URL via href: \(printURL.absoluteString)")
                     return printURL
                 }
@@ -277,7 +320,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let urlRange = Range(match.range(at: 1), in: html)!
             let printPath = String(html[urlRange])
-            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+            if let printURL = URL(string: printPath, relativeTo: baseURL), isValidPrintPageURL(printURL) {
                 print("✅ SE/RecipeBrowserService: Found print URL via data-print-url: \(printURL.absoluteString)")
                 return printURL
             }
@@ -291,7 +334,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let hrefRange = Range(match.range(at: 1), in: html)!
             let printPath = String(html[hrefRange])
-            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+            if let printURL = URL(string: printPath, relativeTo: baseURL), isValidPrintPageURL(printURL) {
                 print("✅ SE/RecipeBrowserService: Found print URL via link rel: \(printURL.absoluteString)")
                 return printURL
             }
@@ -309,7 +352,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
             if printPath.hasSuffix("?") {
                 printPath = String(printPath.dropLast())
             }
-            if let printURL = URL(string: printPath, relativeTo: baseURL) {
+            if let printURL = URL(string: printPath, relativeTo: baseURL), isValidPrintPageURL(printURL) {
                 print("✅ SE/RecipeBrowserService: Found print URL via specific pattern: \(printURL.absoluteString)")
                 return printURL
             }

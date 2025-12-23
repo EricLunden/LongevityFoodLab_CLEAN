@@ -2308,9 +2308,6 @@ struct RecipeDetailView: View {
                                 VStack(spacing: 8) {
                                 ZStack(alignment: .bottomTrailing) {
                                 RecipeRemoteImage(urlString: fixedImageUrl, isShorts: isShorts)
-                                    .frame(height: 200)
-                                    .cornerRadius(12)
-                                    .clipped()
                                     
                                     // Heart Icon - Top Right Corner
                                     VStack {
@@ -2357,6 +2354,7 @@ struct RecipeDetailView: View {
                                     .padding(.trailing, 16)
                                     .padding(.bottom, 16)
                                 }
+                                .frame(maxWidth: .infinity)  // Constrain ZStack width to prevent zoom with wide images
                                 }
                             
                                 // Rating and Category Dropdowns (moved here from below title)

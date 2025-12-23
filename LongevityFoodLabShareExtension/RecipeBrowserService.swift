@@ -70,7 +70,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
             
             switch htmlResult {
             case .success(let html):
-                // Check for print recipe page
+                // Priority 1: Try Print Recipe page (cleanest HTML)
                 if let printURL = self.detectPrintRecipeURL(in: html, baseURL: url) {
                     print("🖨️ SE/RecipeBrowserService: Print page detected, fetching...")
                     // Fetch print page HTML
@@ -78,18 +78,40 @@ class RecipeBrowserService: NSObject, ObservableObject {
                         switch printResult {
                         case .success(let printHTML):
                             print("✅ SE/RecipeBrowserService: Using print page HTML (length: \(printHTML.count))")
-                            // Send print page HTML to Lambda (smaller, cleaner payload)
-                            self.sendToLambdaWithHTML(url: url.absoluteString, html: printHTML, completion: completion)
+                            // Send print page HTML to Lambda with retry logic
+                            self.sendToLambdaWithHTML(url: url.absoluteString, html: printHTML, htmlSource: "print", completion: { result in
+                                // Check if extraction was successful
+                                switch result {
+                                case .success(let recipe):
+                                    // Validate that we got critical data
+                                    // Only retry if ingredients are missing (most critical) or servings is invalid
+                                    let hasIngredients = !recipe.ingredients.isEmpty
+                                    let hasValidServings = recipe.servings > 0 && recipe.servings <= 50
+                                    
+                                    if !hasIngredients || !hasValidServings {
+                                        print("⚠️ SE/RecipeBrowserService: Print page extraction incomplete (servings: \(recipe.servings), ingredients: \(recipe.ingredients.count)), trying Jump To Recipe")
+                                        // Retry with Jump To Recipe
+                                        self.tryJumpToRecipe(html: html, baseURL: url, originalURL: url, completion: completion)
+                                    } else {
+                                        // Success - use print page result
+                                        completion(result)
+                                    }
+                                case .fallbackHostname, .fallbackMeta:
+                                    // Print page failed completely, try Jump To Recipe
+                                    print("⚠️ SE/RecipeBrowserService: Print page extraction failed, trying Jump To Recipe")
+                                    self.tryJumpToRecipe(html: html, baseURL: url, originalURL: url, completion: completion)
+                                }
+                            })
                         case .failure(let printError):
-                            print("⚠️ SE/RecipeBrowserService: Print page fetch failed: \(printError.localizedDescription), falling back to main HTML")
-                            // Fallback to main page HTML if print page fetch fails
-                            self.sendToLambdaWithHTML(url: url.absoluteString, html: html, completion: completion)
+                            print("⚠️ SE/RecipeBrowserService: Print page fetch failed: \(printError.localizedDescription), trying Jump To Recipe")
+                            // Priority 2: Fallback to Jump To Recipe
+                            self.tryJumpToRecipe(html: html, baseURL: url, originalURL: url, completion: completion)
                         }
                     }
                 } else {
-                    // No print page found, use main HTML
-                    print("ℹ️ SE/RecipeBrowserService: No print page found, using main HTML")
-                    self.sendToLambdaWithHTML(url: url.absoluteString, html: html, completion: completion)
+                    // Priority 2: Try Jump To Recipe (if no print page)
+                    print("ℹ️ SE/RecipeBrowserService: No print page found, trying Jump To Recipe")
+                    self.tryJumpToRecipe(html: html, baseURL: url, originalURL: url, completion: completion)
                 }
             case .failure(let error):
                 print("SE/NET: html-fetch error=\(error.localizedDescription)")
@@ -297,6 +319,168 @@ class RecipeBrowserService: NSObject, ObservableObject {
         return nil
     }
     
+    // MARK: - Jump To Recipe Detection & Fetching
+    
+    /// Detects "Jump To Recipe" link/button and returns either a URL or anchor ID
+    /// Returns tuple: (url: URL?, anchorId: String?)
+    private func detectJumpToRecipe(in html: String, baseURL: URL) -> (url: URL?, anchorId: String?) {
+        print("🔍 SE/RecipeBrowserService: Detecting Jump To Recipe link...")
+        
+        // Pattern 1: Anchor links with common recipe anchor IDs
+        // Matches: <a href="#recipe">, <a href="#recipe-card">, <a href="#jump-to-recipe">
+        let anchorPattern = #"href=["']#([^"']*(?:recipe|jump|skip)[^"']*)["']"#
+        if let regex = try? NSRegularExpression(pattern: anchorPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let anchorRange = Range(match.range(at: 1), in: html)!
+            let anchorId = String(html[anchorRange])
+            print("✅ SE/RecipeBrowserService: Found Jump To Recipe anchor: #\(anchorId)")
+            return (nil, anchorId)
+        }
+        
+        // Pattern 2: Links with "jump to recipe" or "skip to recipe" text
+        // Matches: <a href="/recipe">Jump to Recipe</a>
+        let jumpTextPattern = #"<a[^>]*href=["']([^"']+)["'][^>]*>(?:[^<]*jump[^<]*to[^<]*recipe|skip[^<]*to[^<]*recipe)[^<]*</a>"#
+        if let regex = try? NSRegularExpression(pattern: jumpTextPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let hrefRange = Range(match.range(at: 1), in: html)!
+            let hrefPath = String(html[hrefRange])
+            if let jumpURL = URL(string: hrefPath, relativeTo: baseURL) {
+                print("✅ SE/RecipeBrowserService: Found Jump To Recipe URL via text: \(jumpURL.absoluteString)")
+                return (jumpURL, nil)
+            }
+        }
+        
+        // Pattern 3: Data attributes for jump to recipe
+        // Matches: <button data-jump-to-recipe="#recipe">Jump</button>
+        let dataJumpPattern = #"data-jump-to-recipe=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: dataJumpPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let dataRange = Range(match.range(at: 1), in: html)!
+            let dataValue = String(html[dataRange])
+            if dataValue.hasPrefix("#") {
+                let anchorId = String(dataValue.dropFirst())
+                print("✅ SE/RecipeBrowserService: Found Jump To Recipe anchor via data attribute: #\(anchorId)")
+                return (nil, anchorId)
+            } else if let jumpURL = URL(string: dataValue, relativeTo: baseURL) {
+                print("✅ SE/RecipeBrowserService: Found Jump To Recipe URL via data attribute: \(jumpURL.absoluteString)")
+                return (jumpURL, nil)
+            }
+        }
+        
+        // Pattern 4: Common recipe section IDs/classes in the HTML
+        // Look for elements with id or class containing "recipe" that might be the target
+        let recipeSectionPattern = #"<[^>]*(?:id|class)=["']([^"']*(?:recipe-card|recipe-content|recipe-section|recipe-body)[^"']*)["']"#
+        if let regex = try? NSRegularExpression(pattern: recipeSectionPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let sectionRange = Range(match.range(at: 1), in: html)!
+            let sectionId = String(html[sectionRange])
+            // Extract just the ID part if it's a class with multiple values
+            let cleanId = sectionId.components(separatedBy: " ").first { $0.contains("recipe") } ?? sectionId
+            print("✅ SE/RecipeBrowserService: Found recipe section ID: \(cleanId)")
+            return (nil, cleanId)
+        }
+        
+        // Pattern 5: Buttons with recipe-related classes/IDs
+        // Matches: <button class="jump-to-recipe">, <button id="recipe-button">
+        let buttonPattern = #"<button[^>]*(?:class|id)=["']([^"']*(?:recipe|jump|skip)[^"']*)["'][^>]*>"#
+        if let regex = try? NSRegularExpression(pattern: buttonPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let buttonRange = Range(match.range(at: 1), in: html)!
+            let buttonId = String(html[buttonRange])
+            // Check if it has a data attribute pointing to an anchor
+            let dataAttrPattern = #"data-[^=]*=["']#([^"']+)"#
+            if let dataRegex = try? NSRegularExpression(pattern: dataAttrPattern, options: [.caseInsensitive]),
+               let dataMatch = dataRegex.firstMatch(in: html, options: [], range: match.range),
+               dataMatch.numberOfRanges > 1 {
+                let anchorRange = Range(dataMatch.range(at: 1), in: html)!
+                let anchorId = String(html[anchorRange])
+                print("✅ SE/RecipeBrowserService: Found Jump To Recipe anchor via button data attribute: #\(anchorId)")
+                return (nil, anchorId)
+            }
+        }
+        
+        // Pattern 6: Data attributes for recipe sections
+        // Matches: <div data-recipe-section="#recipe">, <section data-recipe-content>
+        let dataRecipePattern = #"data-recipe[^=]*=["']#?([^"']+)"#
+        if let regex = try? NSRegularExpression(pattern: dataRecipePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let dataRange = Range(match.range(at: 1), in: html)!
+            let dataValue = String(html[dataRange])
+            if dataValue.hasPrefix("#") {
+                let anchorId = String(dataValue.dropFirst())
+                print("✅ SE/RecipeBrowserService: Found recipe section via data-recipe attribute: #\(anchorId)")
+                return (nil, anchorId)
+            } else {
+                // Could be a URL
+                if let jumpURL = URL(string: dataValue, relativeTo: baseURL) {
+                    print("✅ SE/RecipeBrowserService: Found recipe URL via data-recipe attribute: \(jumpURL.absoluteString)")
+                    return (jumpURL, nil)
+                }
+            }
+        }
+        
+        // Pattern 7: Common recipe anchor IDs (direct search)
+        // Matches: id="recipe", id="recipe-content", id="recipe-card"
+        let commonAnchors = ["recipe", "recipe-content", "recipe-card", "recipe-section", "recipe-body", "recipe-main", "main-recipe", "jump-to-recipe", "skip-to-recipe"]
+        for anchorId in commonAnchors {
+            let anchorPattern = #"id=["']\(NSRegularExpression.escapedPattern(for: anchorId))["']"#
+            if let regex = try? NSRegularExpression(pattern: anchorPattern, options: [.caseInsensitive]),
+               regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)) != nil {
+                print("✅ SE/RecipeBrowserService: Found common recipe anchor ID: #\(anchorId)")
+                return (nil, anchorId)
+            }
+        }
+        
+        print("⚠️ SE/RecipeBrowserService: No Jump To Recipe link found")
+        return (nil, nil)
+    }
+    
+    /// Extracts HTML section by anchor ID from the main HTML
+    private func extractSectionByAnchor(anchorId: String, from html: String) -> String? {
+        print("🔍 SE/RecipeBrowserService: Extracting section with anchor ID: \(anchorId)")
+        
+        // Escape special regex characters in anchorId
+        let escapedAnchorId = NSRegularExpression.escapedPattern(for: anchorId)
+        
+        // Pattern to find element with matching id and extract its content
+        let idPattern = "<[^>]*id=[\"']\(escapedAnchorId)[\"'][^>]*>([\\s\\S]*?)(?=</[^>]+>|$)"
+        
+        if let regex = try? NSRegularExpression(pattern: idPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let contentRange = Range(match.range(at: 1), in: html)!
+            let sectionHTML = String(html[contentRange])
+            print("✅ SE/RecipeBrowserService: Extracted section HTML (length: \(sectionHTML.count))")
+            return sectionHTML
+        }
+        
+        // Fallback: try to find the element and extract its entire subtree
+        // Look for opening tag, then find matching closing tag
+        let elementStartPattern = "<[^>]*id=[\"']\(escapedAnchorId)[\"'][^>]*>"
+        if let startRegex = try? NSRegularExpression(pattern: elementStartPattern, options: [.caseInsensitive]),
+           let startMatch = startRegex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)) {
+            
+            let startIndex = startMatch.range.location + startMatch.range.length
+            let remainingHTML = String(html[html.index(html.startIndex, offsetBy: startIndex)...])
+            
+            // Try to find the matching closing tag (simplified - assumes same tag name)
+            // For now, just extract a reasonable chunk (up to 50KB or next major section)
+            let maxLength = min(50000, remainingHTML.count)
+            let sectionHTML = String(remainingHTML.prefix(maxLength))
+            print("✅ SE/RecipeBrowserService: Extracted section HTML from start tag (length: \(sectionHTML.count))")
+            return sectionHTML
+        }
+        
+        print("⚠️ SE/RecipeBrowserService: Could not extract section with anchor ID: \(anchorId)")
+        return nil
+    }
+    
     /// Fetches HTML from print recipe page
     /// Uses same configuration as fetchHTML but specifically for print pages
     private func fetchPrintPageHTML(from url: URL, completion: @escaping (Result<String, Error>) -> Void) {
@@ -337,10 +521,45 @@ class RecipeBrowserService: NSObject, ObservableObject {
         }.resume()
     }
     
+    /// Helper function to try Jump To Recipe extraction
+    private func tryJumpToRecipe(html: String, baseURL: URL, originalURL: URL, completion: @escaping (RecipeExtractionResult) -> Void) {
+        let jumpResult = detectJumpToRecipe(in: html, baseURL: baseURL)
+        
+        if let jumpURL = jumpResult.url {
+            // Jump To Recipe points to a separate URL - fetch it
+            print("🔗 SE/RecipeBrowserService: Jump To Recipe URL detected, fetching...")
+            fetchHTML(from: jumpURL) { htmlResult in
+                switch htmlResult {
+                case .success(let jumpHTML):
+                    print("✅ SE/RecipeBrowserService: Using Jump To Recipe HTML (length: \(jumpHTML.count))")
+                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: jumpHTML, htmlSource: "jump-to-recipe", completion: completion)
+                case .failure(let jumpError):
+                    print("⚠️ SE/RecipeBrowserService: Jump To Recipe fetch failed: \(jumpError.localizedDescription), falling back to main HTML")
+                    // Fallback to main HTML
+                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+                }
+            }
+        } else if let anchorId = jumpResult.anchorId {
+            // Jump To Recipe points to an anchor - extract that section
+            if let sectionHTML = extractSectionByAnchor(anchorId: anchorId, from: html) {
+                print("✅ SE/RecipeBrowserService: Using Jump To Recipe section HTML (length: \(sectionHTML.count))")
+                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: sectionHTML, htmlSource: "jump-to-recipe-section", completion: completion)
+            } else {
+                print("⚠️ SE/RecipeBrowserService: Could not extract Jump To Recipe section, falling back to main HTML")
+                // Fallback to main HTML
+                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+            }
+        } else {
+            // No Jump To Recipe found, use main HTML
+            print("ℹ️ SE/RecipeBrowserService: No Jump To Recipe found, using main HTML")
+            self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+        }
+    }
+    
     // MARK: - Lambda Communication
     
-    private func sendToLambdaWithHTML(url: String, html: String, completion: @escaping (RecipeExtractionResult) -> Void) {
-        print("SE/NET: supabase-post start payload={url:\(url), html_len:\(html.count)}")
+    private func sendToLambdaWithHTML(url: String, html: String, htmlSource: String = "main", completion: @escaping (RecipeExtractionResult) -> Void) {
+        print("SE/NET: supabase-post start payload={url:\(url), html_len:\(html.count), source:\(htmlSource)}")
         print("SE/NET: supabase-url=\(SUPABASE_URL)")
         print("SE/NET: supabase-key-length=\(SUPABASE_ANON_KEY.count)")
         
@@ -350,10 +569,11 @@ class RecipeBrowserService: NSObject, ObservableObject {
             return
         }
         
-        // Prepare payload with both URL and HTML
+        // Prepare payload with both URL and HTML, plus source for logging
         let payload: [String: Any] = [
             "url": url,
-            "html": html
+            "html": html,
+            "html_source": htmlSource  // For Lambda logging: "print", "jump-to-recipe", "jump-to-recipe-section", or "main"
         ]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else {
@@ -434,8 +654,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 }
             }
             
-            // Parse Lambda response
-            self.parseLambdaResponse(data: data, url: url, completion: completion)
+            // Parse Lambda response (pass htmlSource and html for fallback extraction)
+            self.parseLambdaResponse(data: data, url: url, htmlSource: htmlSource, html: html, completion: completion)
         }.resume()
     }
     
@@ -520,8 +740,9 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 }
             }
             
-            // Parse Lambda response
-            self.parseLambdaResponse(data: data, url: url, completion: completion)
+            // Parse Lambda response (URL-only, no HTML source) - use ImportedRecipe? overload
+            let importedRecipeCompletion: (ImportedRecipe?) -> Void = completion
+            self.parseLambdaResponse(data: data, url: url, htmlSource: "url-only", html: nil, completion: importedRecipeCompletion)
         }.resume()
     }
     
@@ -555,8 +776,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
         }.resume()
     }
     
-    private func parseLambdaResponse(data: Data, url: String, completion: @escaping (RecipeExtractionResult) -> Void) {
-        print("🔍 SE/NET: [METHOD 1] parseLambdaResponse(RecipeExtractionResult) called - data size: \(data.count) bytes")
+    private func parseLambdaResponse(data: Data, url: String, htmlSource: String = "unknown", html: String? = nil, completion: @escaping (RecipeExtractionResult) -> Void) {
+        print("🔍 SE/NET: [METHOD 1] parseLambdaResponse(RecipeExtractionResult) called - data size: \(data.count) bytes, htmlSource: \(htmlSource)")
         do {
             // First parse as generic JSON to handle field name mapping
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -564,7 +785,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 completion(.fallbackHostname(hostname: URL(string: url)?.host ?? "Unknown Site"))
                 return
             }
-            
+
             print("🔍 SE/NET: [METHOD 1] JSON parsed successfully - keys: \(json.keys.sorted())")
             
             // Check for error response first (quality validation failures, etc.)
@@ -598,15 +819,23 @@ class RecipeBrowserService: NSObject, ObservableObject {
             print("🍽️ Lambda returned servings (raw): \(servingsRaw ?? "nil")")
             print("🍽️ Lambda returned yields (raw): \(yieldsRaw ?? "nil")")
             
+            // Use htmlSource passed from client (Lambda doesn't return it)
+            
             // Enhanced servings parsing - handles ranges, text, yields
             var servings: Int = 4  // Default to 4 (more common than 1)
             var yieldDescription: String? = nil
+            var servingsSource = "default"
             
             // First, try to parse from servings field
             if let servingsInt = json["servings"] as? Int {
                 servings = servingsInt
+                servingsSource = "servings_field_int"
             } else if let servingsStr = json["servings"] as? String, !servingsStr.isEmpty {
-                servings = parseServings(from: servingsStr)
+                let parsed = parseServings(from: servingsStr)
+                if parsed > 0 {
+                    servings = parsed
+                    servingsSource = "servings_field_string"
+                }
             }
             
             // If servings is still default or invalid, try yields field
@@ -615,6 +844,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                     let parsed = parseServings(from: yieldsStr)
                     if parsed > 0 {
                         servings = parsed
+                        servingsSource = "yields_field"
                         // If yields contains descriptive text, save it
                         if yieldsStr.lowercased().contains("makes") || yieldsStr.lowercased().contains("cookies") || yieldsStr.lowercased().contains("pizzas") {
                             yieldDescription = yieldsStr
@@ -623,7 +853,34 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 }
             }
             
-            print("🍽️ Parsed servings value: \(servings) (default: 4 if not found)")
+            // Final fallback: Extract servings directly from HTML if Lambda failed
+            if (servings <= 0 || servings == 4) && servingsSource == "default", let htmlString = html {
+                let extractedServings = extractServingsFromHTML(htmlString)
+                if extractedServings > 0 {
+                    servings = extractedServings
+                    servingsSource = "html_fallback"
+                    print("✅ SERVINGS FALLBACK: Extracted servings \(servings) directly from HTML")
+                }
+            }
+            
+            // Servings validation checkpoint
+            print("🍽️ SERVINGS VALIDATION:")
+            print("   HTML Source: \(htmlSource)")
+            print("   Parsed servings: \(servings)")
+            print("   Servings source: \(servingsSource)")
+            print("   Raw servings value: \(servingsRaw ?? "nil")")
+            print("   Raw yields value: \(yieldsRaw ?? "nil")")
+            
+            // Warn if servings seem suspicious
+            if servings < 1 {
+                print("⚠️ SERVINGS WARNING: Servings is less than 1 - may cause calculation errors")
+            } else if servings > 50 {
+                print("⚠️ SERVINGS WARNING: Servings is greater than 50 - may be incorrect")
+            } else if servings == 4 && servingsSource == "default" {
+                print("⚠️ SERVINGS WARNING: Using default value of 4 - servings may not have been parsed correctly")
+            } else {
+                print("✅ SERVINGS VALIDATION: Servings value appears valid")
+            }
             
             // Handle ingredients - could be array of strings
             var ingredients: [String] = []
@@ -841,10 +1098,10 @@ class RecipeBrowserService: NSObject, ObservableObject {
         }
     }
     
-    private func parseLambdaResponse(data: Data, url: String, completion: @escaping (ImportedRecipe?) -> Void) {
-        print("🔍 SE/NET: [METHOD 2] parseLambdaResponse(ImportedRecipe?) called - data size: \(data.count) bytes")
-        // Use the existing parseLambdaResponse that properly handles nutrition
-        self.parseLambdaResponse(data: data, url: url) { result in
+    private func parseLambdaResponse(data: Data, url: String, htmlSource: String = "unknown", html: String? = nil, completion: @escaping (ImportedRecipe?) -> Void) {
+        print("🔍 SE/NET: [METHOD 2] parseLambdaResponse(ImportedRecipe?) called - data size: \(data.count) bytes, htmlSource: \(htmlSource)")
+        // Use the existing parseLambdaResponse that properly handles nutrition (explicitly use RecipeExtractionResult overload)
+        let recipeExtractionCompletion: (RecipeExtractionResult) -> Void = { result in
             print("🔍 SE/NET: [METHOD 2] Received result from Method 1")
             switch result {
             case .success(let recipe):
@@ -861,6 +1118,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 completion(nil)
             }
         }
+        self.parseLambdaResponse(data: data, url: url, htmlSource: htmlSource, html: html, completion: recipeExtractionCompletion)
     }
     private var watchdogTimer: DispatchSourceTimer?
     private var hasFinished = false
@@ -993,6 +1251,77 @@ class RecipeBrowserService: NSObject, ObservableObject {
             return value
         }
         
+        return 0
+    }
+    
+    /// Extracts servings directly from HTML using multiple patterns
+    /// This is used as a fallback when Lambda fails to extract servings
+    private func extractServingsFromHTML(_ html: String) -> Int {
+        print("🔍 SE/RecipeBrowserService: Extracting servings from HTML (fallback)...")
+        
+        // Pattern 1: Look for structured data (JSON-LD, microdata)
+        // Try to find recipe schema with servings/yield
+        let schemaPatterns = [
+            "(?i)\"servings\"[:\\s]*(\\d+)",
+            "(?i)\"yield\"[:\\s]*\"?(\\d+)\"?",
+            "(?i)\"recipeYield\"[:\\s]*\"?(\\d+)\"?",
+            "(?i)\"servingSize\"[:\\s]*\"?(\\d+)\"?",
+        ]
+        
+        for pattern in schemaPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+               match.numberOfRanges > 1 {
+                let numberRange = Range(match.range(at: 1), in: html)!
+                let numberStr = String(html[numberRange])
+                if let servings = Int(numberStr), servings > 0 && servings <= 50 {
+                    print("✅ SE/RecipeBrowserService: Found servings in structured data: \(servings)")
+                    return servings
+                }
+            }
+        }
+        
+        // Pattern 2: Look for common HTML patterns with servings
+        // Matches: <span>Serves 4</span>, <div>Servings: 6</div>, <p>Makes 8 servings</p>
+        let htmlPatterns = [
+            #"(?i)<[^>]*>(?:serves|servings|makes|yield)[:\s]*(\d+)(?:[-\s](\d+))?"#,
+            #"(?i)(?:serves|servings|makes|yield)[:\s]*(\d+)(?:[-\s](\d+))?\s*(?:servings|people|portions)?"#
+        ]
+        
+        for pattern in htmlPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: min(html.utf16.count, 50000))), // Limit search to first 50KB
+               match.numberOfRanges > 1 {
+                let numberRange = Range(match.range(at: 1), in: html)!
+                let numberStr = String(html[numberRange])
+                if let servings = Int(numberStr), servings > 0 && servings <= 50 {
+                    print("✅ SE/RecipeBrowserService: Found servings in HTML text: \(servings)")
+                    return servings
+                }
+            }
+        }
+        
+        // Pattern 3: Look for meta tags or data attributes
+        let metaPatterns = [
+            ##"(?i)<meta[^>]*(?:property|name|itemprop)=["'](?:servings|yield|recipeYield)["'][^>]*content=["'](\d+)"##,
+            ##"(?i)data-servings=["'](\d+)"##,
+            ##"(?i)data-yield=["'](\d+)"##
+        ]
+        
+        for pattern in metaPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+               match.numberOfRanges > 1 {
+                let numberRange = Range(match.range(at: 1), in: html)!
+                let numberStr = String(html[numberRange])
+                if let servings = Int(numberStr), servings > 0 && servings <= 50 {
+                    print("✅ SE/RecipeBrowserService: Found servings in meta/data attribute: \(servings)")
+                    return servings
+                }
+            }
+        }
+        
+        print("⚠️ SE/RecipeBrowserService: Could not extract servings from HTML")
         return 0
     }
     

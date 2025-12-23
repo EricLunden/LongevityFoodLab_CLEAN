@@ -79,7 +79,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                         case .success(let printHTML):
                             print("✅ SE/RecipeBrowserService: Using print page HTML (length: \(printHTML.count))")
                             // Send print page HTML to Lambda with retry logic
-                            self.sendToLambdaWithHTML(url: url.absoluteString, html: printHTML, htmlSource: "print", completion: { result in
+                            self.sendToLambdaWithHTML(url: url.absoluteString, html: printHTML, htmlSource: "print", fullHTMLForImageExtraction: printHTML, completion: { result in
                                 // Check if extraction was successful
                                 switch result {
                                 case .success(let recipe):
@@ -565,8 +565,11 @@ class RecipeBrowserService: NSObject, ObservableObject {
     }
     
     /// Helper function to try Jump To Recipe extraction
+    /// fullHTML: The complete page HTML (for image extraction from meta tags)
+    /// html: The HTML to send to Lambda (may be a section or full page)
     private func tryJumpToRecipe(html: String, baseURL: URL, originalURL: URL, completion: @escaping (RecipeExtractionResult) -> Void) {
         let jumpResult = detectJumpToRecipe(in: html, baseURL: baseURL)
+        let fullHTML = html  // Store full HTML for image extraction
         
         if let jumpURL = jumpResult.url {
             // Jump To Recipe points to a separate URL - fetch it
@@ -575,33 +578,35 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 switch htmlResult {
                 case .success(let jumpHTML):
                     print("✅ SE/RecipeBrowserService: Using Jump To Recipe HTML (length: \(jumpHTML.count))")
-                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: jumpHTML, htmlSource: "jump-to-recipe", completion: completion)
+                    // Use jumpHTML for both Lambda and image extraction (it's a full page)
+                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: jumpHTML, htmlSource: "jump-to-recipe", fullHTMLForImageExtraction: jumpHTML, completion: completion)
                 case .failure(let jumpError):
                     print("⚠️ SE/RecipeBrowserService: Jump To Recipe fetch failed: \(jumpError.localizedDescription), falling back to main HTML")
                     // Fallback to main HTML
-                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", fullHTMLForImageExtraction: fullHTML, completion: completion)
                 }
             }
         } else if let anchorId = jumpResult.anchorId {
             // Jump To Recipe points to an anchor - extract that section
             if let sectionHTML = extractSectionByAnchor(anchorId: anchorId, from: html) {
                 print("✅ SE/RecipeBrowserService: Using Jump To Recipe section HTML (length: \(sectionHTML.count))")
-                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: sectionHTML, htmlSource: "jump-to-recipe-section", completion: completion)
+                // Send section HTML to Lambda, but use full HTML for image extraction (has meta tags)
+                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: sectionHTML, htmlSource: "jump-to-recipe-section", fullHTMLForImageExtraction: fullHTML, completion: completion)
             } else {
                 print("⚠️ SE/RecipeBrowserService: Could not extract Jump To Recipe section, falling back to main HTML")
                 // Fallback to main HTML
-                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+                self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", fullHTMLForImageExtraction: fullHTML, completion: completion)
             }
         } else {
             // No Jump To Recipe found, use main HTML
             print("ℹ️ SE/RecipeBrowserService: No Jump To Recipe found, using main HTML")
-            self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", completion: completion)
+            self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", fullHTMLForImageExtraction: fullHTML, completion: completion)
         }
     }
     
     // MARK: - Lambda Communication
     
-    private func sendToLambdaWithHTML(url: String, html: String, htmlSource: String = "main", completion: @escaping (RecipeExtractionResult) -> Void) {
+    private func sendToLambdaWithHTML(url: String, html: String, htmlSource: String = "main", fullHTMLForImageExtraction: String? = nil, completion: @escaping (RecipeExtractionResult) -> Void) {
         print("SE/NET: supabase-post start payload={url:\(url), html_len:\(html.count), source:\(htmlSource)}")
         print("SE/NET: supabase-url=\(SUPABASE_URL)")
         print("SE/NET: supabase-key-length=\(SUPABASE_ANON_KEY.count)")
@@ -697,8 +702,10 @@ class RecipeBrowserService: NSObject, ObservableObject {
                 }
             }
             
-            // Parse Lambda response (pass htmlSource and html for fallback extraction)
-            self.parseLambdaResponse(data: data, url: url, htmlSource: htmlSource, html: html, completion: completion)
+            // Parse Lambda response (pass htmlSource and fullHTML for image extraction)
+            // Use fullHTMLForImageExtraction if provided (has meta tags), otherwise use html
+            let htmlForImageExtraction = fullHTMLForImageExtraction ?? html
+            self.parseLambdaResponse(data: data, url: url, htmlSource: htmlSource, html: htmlForImageExtraction, completion: completion)
         }.resume()
     }
     
@@ -1034,7 +1041,40 @@ class RecipeBrowserService: NSObject, ObservableObject {
             }
             
             // Handle image URL - check both possible field names
-            let imageUrl = (json["image_url"] as? String) ?? (json["image"] as? String)
+            var imageUrl = (json["image_url"] as? String) ?? (json["image"] as? String)
+            
+            // Log what Lambda returned for image
+            if let lambdaImageUrl = imageUrl, !lambdaImageUrl.isEmpty {
+                print("🖼️ SE/NET: Lambda returned image URL: \(lambdaImageUrl)")
+            } else {
+                print("⚠️ SE/NET: Lambda returned no image URL (nil or empty)")
+            }
+            
+            // Always try HTML extraction as backup/validation
+            // HTML meta tags (og:image, etc.) are often more reliable than Lambda's extraction
+            if let htmlContent = html {
+                if let htmlImageUrl = extractImageFromHTML(htmlContent, baseURL: url) {
+                    // If Lambda didn't provide an image, use HTML extraction
+                    if imageUrl == nil || imageUrl?.isEmpty == true || imageUrl == "N/A" {
+                        imageUrl = htmlImageUrl
+                        print("✅ SE/NET: Using HTML-extracted image (Lambda had none): \(htmlImageUrl)")
+                    } else {
+                        // Lambda provided an image, but HTML extraction found a different one
+                        // Prefer HTML extraction as it's often more reliable (og:image, etc.)
+                        let lambdaImageUrl = imageUrl  // Store Lambda's URL for logging
+                        imageUrl = htmlImageUrl
+                        print("✅ SE/NET: Using HTML-extracted image (preferred over Lambda): \(htmlImageUrl)")
+                        print("ℹ️ SE/NET: Lambda's image URL was: \(lambdaImageUrl ?? "nil")")
+                    }
+                } else {
+                    // HTML extraction failed, use Lambda's if available
+                    if imageUrl == nil || imageUrl?.isEmpty == true || imageUrl == "N/A" {
+                        print("⚠️ SE/NET: Both Lambda and HTML extraction failed to find image")
+                    } else {
+                        print("ℹ️ SE/NET: Using Lambda's image URL (HTML extraction found none): \(imageUrl ?? "nil")")
+                    }
+                }
+            }
             
             // Extract nutrition from Lambda response
             var extractedNutrition: NutritionInfo? = nil
@@ -1304,6 +1344,93 @@ class RecipeBrowserService: NSObject, ObservableObject {
     
     /// Extracts servings directly from HTML using multiple patterns
     /// This is used as a fallback when Lambda fails to extract servings
+    /// Extracts image URL from HTML meta tags (fallback when Lambda doesn't provide one)
+    /// Checks og:image, twitter:image, schema.org image, and other common meta tags
+    private func extractImageFromHTML(_ html: String, baseURL: String) -> String? {
+        // Pattern 1: Open Graph image (most common)
+        // Matches: <meta property="og:image" content="https://example.com/image.jpg">
+        let ogImagePattern = #"<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: ogImagePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let contentRange = Range(match.range(at: 1), in: html)!
+            var imageUrl = String(html[contentRange])
+            // Resolve relative URLs
+            if imageUrl.hasPrefix("//") {
+                imageUrl = "https:" + imageUrl
+            } else if !imageUrl.hasPrefix("http") {
+                if let base = URL(string: baseURL), let resolved = URL(string: imageUrl, relativeTo: base) {
+                    imageUrl = resolved.absoluteString
+                }
+            }
+            if !imageUrl.isEmpty && imageUrl.hasPrefix("http") {
+                return imageUrl
+            }
+        }
+        
+        // Pattern 2: Twitter Card image
+        // Matches: <meta name="twitter:image" content="https://example.com/image.jpg">
+        let twitterImagePattern = #"<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: twitterImagePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let contentRange = Range(match.range(at: 1), in: html)!
+            var imageUrl = String(html[contentRange])
+            if imageUrl.hasPrefix("//") {
+                imageUrl = "https:" + imageUrl
+            } else if !imageUrl.hasPrefix("http") {
+                if let base = URL(string: baseURL), let resolved = URL(string: imageUrl, relativeTo: base) {
+                    imageUrl = resolved.absoluteString
+                }
+            }
+            if !imageUrl.isEmpty && imageUrl.hasPrefix("http") {
+                return imageUrl
+            }
+        }
+        
+        // Pattern 3: Schema.org image in JSON-LD
+        // Matches: "image": "https://example.com/image.jpg" or "image": {"@type": "ImageObject", "url": "..."}
+        let schemaImagePattern = #""image"\s*:\s*"([^"]+)"#
+        if let regex = try? NSRegularExpression(pattern: schemaImagePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let urlRange = Range(match.range(at: 1), in: html)!
+            var imageUrl = String(html[urlRange])
+            if imageUrl.hasPrefix("//") {
+                imageUrl = "https:" + imageUrl
+            } else if !imageUrl.hasPrefix("http") {
+                if let base = URL(string: baseURL), let resolved = URL(string: imageUrl, relativeTo: base) {
+                    imageUrl = resolved.absoluteString
+                }
+            }
+            if !imageUrl.isEmpty && imageUrl.hasPrefix("http") {
+                return imageUrl
+            }
+        }
+        
+        // Pattern 4: Generic meta image tag
+        // Matches: <meta name="image" content="https://example.com/image.jpg">
+        let metaImagePattern = #"<meta[^>]*name=["']image["'][^>]*content=["']([^"']+)["']"#
+        if let regex = try? NSRegularExpression(pattern: metaImagePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+           match.numberOfRanges > 1 {
+            let contentRange = Range(match.range(at: 1), in: html)!
+            var imageUrl = String(html[contentRange])
+            if imageUrl.hasPrefix("//") {
+                imageUrl = "https:" + imageUrl
+            } else if !imageUrl.hasPrefix("http") {
+                if let base = URL(string: baseURL), let resolved = URL(string: imageUrl, relativeTo: base) {
+                    imageUrl = resolved.absoluteString
+                }
+            }
+            if !imageUrl.isEmpty && imageUrl.hasPrefix("http") {
+                return imageUrl
+            }
+        }
+        
+        return nil
+    }
+    
     private func extractServingsFromHTML(_ html: String) -> Int {
         print("🔍 SE/RecipeBrowserService: Extracting servings from HTML (fallback)...")
         

@@ -244,7 +244,14 @@ class RecipeManager: ObservableObject, @unchecked Sendable {
                 )
             }
             
-            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Fix missing "1" prefix for ingredients starting with unit words
+            if !cleaned.isEmpty {
+                cleaned = addMissingOnePrefix(to: cleaned)
+            }
+            
+            return cleaned
         }.filter { !$0.isEmpty }
         
         // Number the ingredients
@@ -800,6 +807,41 @@ class RecipeManager: ObservableObject, @unchecked Sendable {
         }
         
         return order == .descending ? sortedRecipes.reversed() : sortedRecipes
+    }
+    
+    /// Adds "1 " prefix to ingredients that start with unit words but don't have a number
+    private func addMissingOnePrefix(to ingredient: String) -> String {
+        let trimmed = ingredient.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercased = trimmed.lowercased()
+        
+        // Check if ingredient already starts with a number or fraction
+        let startsWithNumberPattern = #"^(\d+|\d+\s*/\s*\d+|\d+\.\d+)"#
+        if let regex = try? NSRegularExpression(pattern: startsWithNumberPattern, options: []),
+           regex.firstMatch(in: trimmed, options: [], range: NSRange(location: 0, length: trimmed.utf16.count)) != nil {
+            // Already has a number, return as-is
+            return trimmed
+        }
+        
+        // List of unit words that should have "1" prefix if missing
+        let unitWords = ["cup", "cups", "teaspoon", "teaspoons", "tablespoon", "tablespoons",
+                        "ounce", "ounces", "pound", "pounds", "gram", "grams", "kilogram", "kilograms",
+                        "liter", "liters", "quart", "quarts", "pint", "pints", "gallon", "gallons",
+                        "milliliter", "milliliters", "pinch", "pinches", "dash", "dashes",
+                        "can", "cans", "package", "packages", "bunch", "bunches",
+                        "bag", "bags", "bottle", "bottles", "box", "boxes", "jar", "jars",
+                        "head", "heads", "clove", "cloves", "stalk", "stalks", "sprig", "sprigs",
+                        "strip", "strips", "stick", "sticks"]
+        
+        // Check if ingredient starts with a unit word
+        for unit in unitWords {
+            if lowercased.hasPrefix(unit) {
+                // Found unit word at start without number, add "1 " prefix
+                return "1 \(trimmed)"
+            }
+        }
+        
+        // No unit word found at start, return as-is
+        return trimmed
     }
 }
 

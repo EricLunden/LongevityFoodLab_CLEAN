@@ -2300,14 +2300,16 @@ struct RecipeDetailView: View {
                             // Fix malformed URLs that start with //
                             let fixedImageUrl = imageUrl.hasPrefix("//") ? "https:" + imageUrl : imageUrl
                             
-                            // Check if this is a YouTube Shorts URL
-                            let isShorts = (currentRecipe.sourceURL?.contains("youtube.com/shorts/") == true) || 
-                                          (currentRecipe.sourceURL?.contains("youtu.be/") == true)
+                            // Check if this is a YouTube Shorts URL (only shorts, not regular YouTube)
+                            let isShorts = currentRecipe.sourceURL?.contains("youtube.com/shorts/") == true
                             
                             VStack(alignment: .leading, spacing: 8) {
                                 VStack(spacing: 8) {
                                 ZStack(alignment: .bottomTrailing) {
                                 RecipeRemoteImage(urlString: fixedImageUrl, isShorts: isShorts)
+                                    .onAppear {
+                                        print("IMG/RecipesView: Recipe '\(currentRecipe.title)' sourceURL=\(currentRecipe.sourceURL ?? "nil"), isShorts=\(isShorts)")
+                                    }
                                     
                                     // Heart Icon - Top Right Corner
                                     VStack {
@@ -3153,9 +3155,8 @@ struct RecipeGridCard: View {
                             if let imageUrl = recipe.image, !imageUrl.isEmpty {
                                 let fixedImageUrl = imageUrl.hasPrefix("//") ? "https:" + imageUrl : imageUrl
                                 
-                                // Check if this is a YouTube Shorts URL
-                                let isShorts = (recipe.sourceURL?.contains("youtube.com/shorts/") == true) || 
-                                              (recipe.sourceURL?.contains("youtu.be/") == true)
+                                // Check if this is a YouTube Shorts URL (only shorts, not regular YouTube)
+                                let isShorts = recipe.sourceURL?.contains("youtube.com/shorts/") == true
                                 
                                 CachedRecipeImageView(
                                     urlString: fixedImageUrl,
@@ -3170,6 +3171,9 @@ struct RecipeGridCard: View {
                                     ),
                                     isShorts: isShorts
                                 )
+                                .onAppear {
+                                    print("IMG/RecipesView: Recipe list '\(recipe.title)' sourceURL=\(recipe.sourceURL ?? "nil"), isShorts=\(isShorts)")
+                                }
                             } else {
                                 Rectangle()
                                     .fill(Color.gray.opacity(0.3))

@@ -4,7 +4,7 @@ import SwiftUI
 /// Use HTTPS only. Logs are prefixed with IMG:
 struct RecipeRemoteImage: View {
     let urlString: String
-    let isShorts: Bool  // For YouTube Shorts - zoom to fill without letterboxing
+    let isShorts: Bool
 
     @State private var uiImage: UIImage?
     @State private var isLoading = false
@@ -20,10 +20,10 @@ struct RecipeRemoteImage: View {
             if let img = uiImage {
                 Image(uiImage: img)
                     .resizable()
-                    .scaledToFill()  // Aggressively fill frame - zoom to remove letterboxing
-                    .frame(maxWidth: .infinity, maxHeight: 200)  // Fill width, constrain height
-                    .frame(height: 200)  // Fixed horizontal box for all recipes
-                    .clipped()  // Crop to fill rectangle (removes letterboxing for Shorts)
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .frame(height: 200)
+                    .clipped()
                     .cornerRadius(12)
                     .contentShape(Rectangle())
             } else if isLoading {
@@ -64,9 +64,9 @@ struct RecipeRemoteImage: View {
                     .onAppear { fetch() }
             }
         }
-        .frame(maxWidth: .infinity)  // Fill available width
-        .frame(height: 200)  // Fixed horizontal box for all recipes
-        .clipped()  // Ensure no overflow
+        .frame(maxWidth: .infinity)
+        .frame(height: 200)
+        .clipped()
         .onAppear {
             if uiImage == nil && !isLoading { fetch() }
         }
@@ -152,23 +152,11 @@ struct RecipeRemoteImage: View {
                 return
             }
             if let img = UIImage(data: data) {
-                // Log original image dimensions
-                print("IMG: downloaded image size=\(img.size) isShorts=\(isShorts)")
-                
-                // For Shorts, crop vertical image to horizontal if needed
-                var processedImage = img
-                if isShorts && img.size.height > img.size.width {
-                    processedImage = self.cropVerticalToHorizontal(img)
-                    print("IMG: cropped Shorts image from \(img.size) to \(processedImage.size)")
-                } else if isShorts {
-                    print("IMG: Shorts image already horizontal, no crop needed")
-                }
-                
                 DispatchQueue.main.async {
-                    self.uiImage = processedImage
+                    self.uiImage = img
                     self.isLoading = false
                 }
-                print("IMG: success \(url.absoluteString) bytes=\(data.count) isShorts=\(isShorts)")
+                print("IMG: success \(url.absoluteString) bytes=\(data.count)")
             } else {
                 DispatchQueue.main.async {
                     self.isLoading = false
@@ -178,43 +166,5 @@ struct RecipeRemoteImage: View {
             }
         }
         task.resume()
-    }
-    
-    /// Crops a vertical image to horizontal aspect ratio by taking center strip
-    /// This removes letterboxing from YouTube Shorts thumbnails
-    private func cropVerticalToHorizontal(_ image: UIImage) -> UIImage {
-        // Only process if image is taller than wide (vertical)
-        guard image.size.height > image.size.width else { 
-            return image 
-        }
-        
-        guard let cgImage = image.cgImage else { 
-            return image 
-        }
-        
-        // Calculate target height for ~16:9 horizontal crop
-        let targetAspectRatio: CGFloat = 16.0 / 9.0
-        let targetHeight = image.size.width / targetAspectRatio
-        
-        // If the image isn't tall enough, use gentler crop
-        let actualTargetHeight = min(targetHeight, image.size.height * 0.8)
-        
-        // Center the crop vertically
-        let cropY = (image.size.height - actualTargetHeight) / 2
-        
-        // Create crop rect (account for image scale)
-        let scale = image.scale
-        let cropRect = CGRect(
-            x: 0,
-            y: cropY * scale,
-            width: image.size.width * scale,
-            height: actualTargetHeight * scale
-        )
-        
-        guard let croppedCGImage = cgImage.cropping(to: cropRect) else { 
-            return image 
-        }
-        
-        return UIImage(cgImage: croppedCGImage, scale: scale, orientation: image.imageOrientation)
     }
 }

@@ -164,12 +164,15 @@ struct RecipePreviewView: View {
                                         // Fix malformed URLs that start with //
                                         let fixedImageUrl = imageURL.hasPrefix("//") ? "https:" + imageURL : imageURL
                                         
-                                        // Check if this is a YouTube Shorts URL
-                                        let isShorts = loadingState.sourceUrl.contains("youtube.com/shorts/") || loadingState.sourceUrl.contains("youtu.be/")
+                                        // Check if this is a YouTube Shorts URL (only shorts, not regular YouTube)
+                                        let isShorts = loadingState.sourceUrl.contains("youtube.com/shorts/")
                                         
                                     if USE_CUSTOM_IMAGE_LOADER {
                                     // Custom loader path (feature-flagged)
                                             RecipeRemoteImage(urlString: fixedImageUrl, isShorts: isShorts)
+                                                .onAppear {
+                                                    print("IMG/Preview: RecipePreviewView sourceURL=\(loadingState.sourceUrl), isShorts=\(isShorts)")
+                                                }
                                 } else {
                                     // AsyncImage with diagnostics
                                     if let u = URL(string: fixedImageUrl) {

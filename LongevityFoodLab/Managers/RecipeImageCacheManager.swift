@@ -73,12 +73,14 @@ class RecipeImageCacheManager: ObservableObject {
             return memoryCache[key]
         }
         if let cachedImage = cachedImage {
+            print("IMG/Cache: Loaded from memory cache, size=\(cachedImage.size), url=\(fixedUrl.prefix(50))...")
             return cachedImage
         }
         
         // Check disk cache
         let cacheFile = cacheFileURL(for: fixedUrl)
         if let diskImage = loadFromDisk(cacheFile: cacheFile) {
+            print("IMG/Cache: Loaded from disk cache, size=\(diskImage.size), url=\(fixedUrl.prefix(50))...")
             // Load into memory cache
             cacheQueue.async(flags: .barrier) {
                 self.memoryCache[key] = diskImage
@@ -145,6 +147,8 @@ class RecipeImageCacheManager: ObservableObject {
                     print("⚠️ RecipeImageCacheManager: Failed to create image from data")
                     return
                 }
+                
+                print("IMG/Cache: Downloaded image, size=\(image.size), url=\(url.absoluteString.prefix(50))...")
                 
                 // Save to disk cache
                 try? data.write(to: cacheFile)

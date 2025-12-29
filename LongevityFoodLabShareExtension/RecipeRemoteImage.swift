@@ -16,57 +16,57 @@ struct RecipeRemoteImage: View {
     }
 
     var body: some View {
-        // Constrain container from the start to prevent zoom effect
-        // Use GeometryReader to get exact available width and prevent any expansion
-        GeometryReader { geometry in
-            Group {
-                if let img = uiImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)  // Fill entire frame - crops top/bottom for Shorts
-                        .frame(width: geometry.size.width, height: 200)  // Same horizontal box for all
-                        .clipped()  // Crop to fill rectangle (removes letterboxing for Shorts)
-                        .cornerRadius(12)
-                        .contentShape(Rectangle())
-                } else if isLoading {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: geometry.size.width, height: 200)
-                        .cornerRadius(12)
-                        .overlay(ProgressView())
-                } else if let err = loadError {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: geometry.size.width, height: 200)
-                        .cornerRadius(12)
-                        .overlay(
-                            VStack(spacing: 6) {
-                                Image(systemName: "photo")
-                                    .font(.title2)
-                                    .foregroundColor(.gray)
-                                Text("Image failed")
-                                    .font(.footnote)
-                                    .foregroundColor(.gray)
-                                Text(err)
-                                    .font(.caption2)
-                                    .foregroundColor(.gray)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 8)
-                            }
-                        )
-                } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.15))
-                        .frame(width: geometry.size.width, height: 200)
-                        .cornerRadius(12)
-                        .onAppear { fetch() }
-                }
+        Group {
+            if let img = uiImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()  // Aggressively fill frame - zoom to remove letterboxing
+                    .frame(maxWidth: .infinity, maxHeight: 200)  // Fill width, constrain height
+                    .frame(height: 200)  // Fixed horizontal box for all recipes
+                    .clipped()  // Crop to fill rectangle (removes letterboxing for Shorts)
+                    .cornerRadius(12)
+                    .contentShape(Rectangle())
+            } else if isLoading {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .frame(height: 200)
+                    .cornerRadius(12)
+                    .overlay(ProgressView())
+            } else if let err = loadError {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .frame(height: 200)
+                    .cornerRadius(12)
+                    .overlay(
+                        VStack(spacing: 6) {
+                            Image(systemName: "photo")
+                                .font(.title2)
+                                .foregroundColor(.gray)
+                            Text("Image failed")
+                                .font(.footnote)
+                                .foregroundColor(.gray)
+                            Text(err)
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+                    )
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.15))
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .frame(height: 200)
+                    .cornerRadius(12)
+                    .onAppear { fetch() }
             }
-            .frame(width: geometry.size.width)  // Constrain Group to exact width
-            .clipped()  // Prevent overflow
         }
+        .frame(maxWidth: .infinity)  // Fill available width
         .frame(height: 200)  // Fixed horizontal box for all recipes
+        .clipped()  // Ensure no overflow
         .onAppear {
             if uiImage == nil && !isLoading { fetch() }
         }
@@ -152,11 +152,13 @@ struct RecipeRemoteImage: View {
                 return
             }
             if let img = UIImage(data: data) {
+                // For Shorts, crop letterboxing (black bars) if present
+                let processedImage = isShorts ? self.cropLetterboxing(from: img) : img
                 DispatchQueue.main.async {
-                    self.uiImage = img
+                    self.uiImage = processedImage
                     self.isLoading = false
                 }
-                print("IMG: success \(url.absoluteString) bytes=\(data.count)")
+                print("IMG: success \(url.absoluteString) bytes=\(data.count) isShorts=\(isShorts)")
             } else {
                 DispatchQueue.main.async {
                     self.isLoading = false
@@ -166,5 +168,86 @@ struct RecipeRemoteImage: View {
             }
         }
         task.resume()
+    }
+    
+    /// Crop black letterboxing bars from YouTube Shorts thumbnails
+    private func cropLetterboxing(from image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        
+        let width = cgImage.width
+        let height = cgImage.height
+        
+        // Sample pixels along horizontal center line to detect black bars
+        let centerY = height / 2
+        var leftBarWidth = 0
+        var rightBarWidth = 0
+        
+        // Find left black bar
+        for x in 0..<width {
+            if let pixel = getPixelColor(cgImage: cgImage, x: x, y: centerY) {
+                let brightness = (pixel.red + pixel.green + pixel.blue) / 3.0
+                if brightness > 0.1 { // Not black (threshold for black detection)
+                    leftBarWidth = x
+                    break
+                }
+            }
+        }
+        
+        // Find right black bar
+        for x in stride(from: width - 1, through: 0, by: -1) {
+            if let pixel = getPixelColor(cgImage: cgImage, x: x, y: centerY) {
+                let brightness = (pixel.red + pixel.green + pixel.blue) / 3.0
+                if brightness > 0.1 { // Not black
+                    rightBarWidth = width - x - 1
+                    break
+                }
+            }
+        }
+        
+        // Only crop if significant black bars detected (>5% of width)
+        let totalBars = leftBarWidth + rightBarWidth
+        if totalBars > Int(Double(width) * 0.05) {
+            let cropRect = CGRect(
+                x: leftBarWidth,
+                y: 0,
+                width: width - leftBarWidth - rightBarWidth,
+                height: height
+            )
+            if let croppedCGImage = cgImage.cropping(to: cropRect) {
+                return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
+            }
+        }
+        
+        return image
+    }
+    
+    /// Get pixel color at specific coordinates
+    private func getPixelColor(cgImage: CGImage, x: Int, y: Int) -> (red: CGFloat, green: CGFloat, blue: CGFloat)? {
+        guard x >= 0 && x < cgImage.width && y >= 0 && y < cgImage.height else { return nil }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel
+        let bitsPerComponent = 8
+        
+        var pixelData = [UInt8](repeating: 0, count: bytesPerPixel)
+        
+        guard let context = CGContext(
+            data: &pixelData,
+            width: 1,
+            height: 1,
+            bitsPerComponent: bitsPerComponent,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        
+        context.draw(cgImage, in: CGRect(x: -x, y: -y, width: cgImage.width, height: cgImage.height))
+        
+        let red = CGFloat(pixelData[0]) / 255.0
+        let green = CGFloat(pixelData[1]) / 255.0
+        let blue = CGFloat(pixelData[2]) / 255.0
+        
+        return (red, green, blue)
     }
 }

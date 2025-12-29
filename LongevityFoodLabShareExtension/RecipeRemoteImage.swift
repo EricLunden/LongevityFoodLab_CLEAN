@@ -19,25 +19,30 @@ struct RecipeRemoteImage: View {
         // Constrain container from the start to prevent zoom effect
         // Use GeometryReader to get exact available width and prevent any expansion
         GeometryReader { geometry in
+            // Calculate height: taller for Shorts (9:16 ratio) to avoid letterboxing
+            // For Shorts: use 9:16 aspect ratio (width * 16/9 ≈ width * 1.78)
+            // Cap at 400pt to prevent excessive height
+            let imageHeight = isShorts ? min(geometry.size.width * 1.78, 400) : 200
+            
             Group {
                 if let img = uiImage {
                     Image(uiImage: img)
                         .resizable()
                         .aspectRatio(contentMode: .fill)  // Fill entire frame
-                        .frame(width: geometry.size.width, height: 200)  // Use exact width from GeometryReader
+                        .frame(width: geometry.size.width, height: imageHeight)  // Dynamic height for Shorts
                         .clipped()  // Crop to fill rectangle (no letterboxing)
                         .cornerRadius(12)
                         .contentShape(Rectangle())
                 } else if isLoading {
                     Rectangle()
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: geometry.size.width, height: 200)
+                        .frame(width: geometry.size.width, height: imageHeight)
                         .cornerRadius(12)
                         .overlay(ProgressView())
                 } else if let err = loadError {
                     Rectangle()
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: geometry.size.width, height: 200)
+                        .frame(width: geometry.size.width, height: imageHeight)
                         .cornerRadius(12)
                         .overlay(
                             VStack(spacing: 6) {
@@ -58,7 +63,7 @@ struct RecipeRemoteImage: View {
                 } else {
                     Rectangle()
                         .fill(Color.gray.opacity(0.15))
-                        .frame(width: geometry.size.width, height: 200)
+                        .frame(width: geometry.size.width, height: imageHeight)
                         .cornerRadius(12)
                         .onAppear { fetch() }
                 }
@@ -66,7 +71,7 @@ struct RecipeRemoteImage: View {
             .frame(width: geometry.size.width)  // Constrain Group to exact width
             .clipped()  // Prevent overflow
         }
-        .frame(height: 200)  // Fixed height for GeometryReader
+        .aspectRatio(isShorts ? 9/16 : 200/375, contentMode: .fit)  // 9:16 for Shorts, ~200:375 for regular
         .onAppear {
             if uiImage == nil && !isLoading { fetch() }
         }

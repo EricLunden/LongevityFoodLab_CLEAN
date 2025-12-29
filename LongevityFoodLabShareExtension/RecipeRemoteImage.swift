@@ -152,8 +152,18 @@ struct RecipeRemoteImage: View {
                 return
             }
             if let img = UIImage(data: data) {
-                // For Shorts, crop letterboxing (black bars) if present
-                let processedImage = isShorts ? self.cropLetterboxing(from: img) : img
+                // Log original image dimensions
+                print("IMG: downloaded image size=\(img.size) isShorts=\(isShorts)")
+                
+                // For Shorts, crop vertical image to horizontal if needed
+                var processedImage = img
+                if isShorts && img.size.height > img.size.width {
+                    processedImage = self.cropVerticalToHorizontal(img)
+                    print("IMG: cropped Shorts image from \(img.size) to \(processedImage.size)")
+                } else if isShorts {
+                    print("IMG: Shorts image already horizontal, no crop needed")
+                }
+                
                 DispatchQueue.main.async {
                     self.uiImage = processedImage
                     self.isLoading = false
@@ -170,84 +180,41 @@ struct RecipeRemoteImage: View {
         task.resume()
     }
     
-    /// Crop black letterboxing bars from YouTube Shorts thumbnails
-    private func cropLetterboxing(from image: UIImage) -> UIImage {
-        guard let cgImage = image.cgImage else { return image }
-        
-        let width = cgImage.width
-        let height = cgImage.height
-        
-        // Sample pixels along horizontal center line to detect black bars
-        let centerY = height / 2
-        var leftBarWidth = 0
-        var rightBarWidth = 0
-        
-        // Find left black bar
-        for x in 0..<width {
-            if let pixel = getPixelColor(cgImage: cgImage, x: x, y: centerY) {
-                let brightness = (pixel.red + pixel.green + pixel.blue) / 3.0
-                if brightness > 0.1 { // Not black (threshold for black detection)
-                    leftBarWidth = x
-                    break
-                }
-            }
+    /// Crops a vertical image to horizontal aspect ratio by taking center strip
+    /// This removes letterboxing from YouTube Shorts thumbnails
+    private func cropVerticalToHorizontal(_ image: UIImage) -> UIImage {
+        // Only process if image is taller than wide (vertical)
+        guard image.size.height > image.size.width else { 
+            return image 
         }
         
-        // Find right black bar
-        for x in stride(from: width - 1, through: 0, by: -1) {
-            if let pixel = getPixelColor(cgImage: cgImage, x: x, y: centerY) {
-                let brightness = (pixel.red + pixel.green + pixel.blue) / 3.0
-                if brightness > 0.1 { // Not black
-                    rightBarWidth = width - x - 1
-                    break
-                }
-            }
+        guard let cgImage = image.cgImage else { 
+            return image 
         }
         
-        // Only crop if significant black bars detected (>5% of width)
-        let totalBars = leftBarWidth + rightBarWidth
-        if totalBars > Int(Double(width) * 0.05) {
-            let cropRect = CGRect(
-                x: leftBarWidth,
-                y: 0,
-                width: width - leftBarWidth - rightBarWidth,
-                height: height
-            )
-            if let croppedCGImage = cgImage.cropping(to: cropRect) {
-                return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
-            }
+        // Calculate target height for ~16:9 horizontal crop
+        let targetAspectRatio: CGFloat = 16.0 / 9.0
+        let targetHeight = image.size.width / targetAspectRatio
+        
+        // If the image isn't tall enough, use gentler crop
+        let actualTargetHeight = min(targetHeight, image.size.height * 0.8)
+        
+        // Center the crop vertically
+        let cropY = (image.size.height - actualTargetHeight) / 2
+        
+        // Create crop rect (account for image scale)
+        let scale = image.scale
+        let cropRect = CGRect(
+            x: 0,
+            y: cropY * scale,
+            width: image.size.width * scale,
+            height: actualTargetHeight * scale
+        )
+        
+        guard let croppedCGImage = cgImage.cropping(to: cropRect) else { 
+            return image 
         }
         
-        return image
-    }
-    
-    /// Get pixel color at specific coordinates
-    private func getPixelColor(cgImage: CGImage, x: Int, y: Int) -> (red: CGFloat, green: CGFloat, blue: CGFloat)? {
-        guard x >= 0 && x < cgImage.width && y >= 0 && y < cgImage.height else { return nil }
-        
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel
-        let bitsPerComponent = 8
-        
-        var pixelData = [UInt8](repeating: 0, count: bytesPerPixel)
-        
-        guard let context = CGContext(
-            data: &pixelData,
-            width: 1,
-            height: 1,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        
-        context.draw(cgImage, in: CGRect(x: -x, y: -y, width: cgImage.width, height: cgImage.height))
-        
-        let red = CGFloat(pixelData[0]) / 255.0
-        let green = CGFloat(pixelData[1]) / 255.0
-        let blue = CGFloat(pixelData[2]) / 255.0
-        
-        return (red, green, blue)
+        return UIImage(cgImage: croppedCGImage, scale: scale, orientation: image.imageOrientation)
     }
 }

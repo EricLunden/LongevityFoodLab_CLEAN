@@ -2214,6 +2214,71 @@ def finalize_response(recipe_data, url):
         print(f"LAMBDA/NORM: Final ingredients count: {len(cleaned_ing)}")
         recipe_data["ingredients"] = cleaned_ing
     
+    # STEP 4: Normalize ingredient sections (print pages only)
+    if isinstance(recipe_data.get("ingredient_sections"), list):
+        normalized_sections = []
+        for section in recipe_data["ingredient_sections"]:
+            if isinstance(section, dict) and 'name' in section and 'ingredients' in section:
+                normalized_ingredients = []
+                _seen_section = set()
+                for ingredient_text in section['ingredients']:
+                    c = _normalize_text(ingredient_text)
+                    c = _normalize_ingredient_quantity(c)
+                    if len(c) > 2 and c.lower() not in _seen_section:
+                        normalized_ingredients.append(c)
+                        _seen_section.add(c.lower())
+                
+                if len(normalized_ingredients) >= 2:  # Section must have at least 2 ingredients
+                    normalized_sections.append({
+                        'name': section['name'].strip(),
+                        'ingredients': normalized_ingredients
+                    })
+        
+        if normalized_sections:
+            recipe_data["ingredient_sections"] = normalized_sections
+            print(f"LAMBDA/NORM: Normalized {len(normalized_sections)} ingredient sections")
+        else:
+            # Remove if no valid sections after normalization
+            recipe_data.pop("ingredient_sections", None)
+    
+    # STEP 5: Normalize instruction groups (print pages only)
+    if isinstance(recipe_data.get("instruction_groups"), list):
+        normalized_groups = []
+        for group in recipe_data["instruction_groups"]:
+            if isinstance(group, dict) and 'label' in group and 'steps' in group:
+                normalized_steps = []
+                _seen_steps_group = set()
+                for step_text in group['steps']:
+                    c = _normalize_text(step_text)
+                    if len(c) > 5:
+                        normalized_step = c.lower().strip()
+                        # Deduplicate within group
+                        if normalized_step not in _seen_steps_group:
+                            normalized_steps.append(c)
+                            _seen_steps_group.add(normalized_step)
+                
+                if len(normalized_steps) >= 1:  # Group must have at least 1 step
+                    normalized_groups.append({
+                        'label': group['label'].strip(),
+                        'steps': normalized_steps
+                    })
+        
+        if normalized_groups:
+            recipe_data["instruction_groups"] = normalized_groups
+            print(f"LAMBDA/NORM: Normalized {len(normalized_groups)} instruction groups")
+        else:
+            # Remove if no valid groups after normalization
+            recipe_data.pop("instruction_groups", None)
+    
+    # STEP 6: Normalize recipe notes (print pages only)
+    if recipe_data.get("recipe_notes"):
+        notes_text = _normalize_text(recipe_data["recipe_notes"])
+        if len(notes_text) > 10:  # Must have substantial content
+            recipe_data["recipe_notes"] = notes_text
+            print(f"LAMBDA/NORM: Normalized recipe notes (length: {len(notes_text)})")
+        else:
+            recipe_data.pop("recipe_notes", None)
+    
     # Clean instructions with improved deduplication
     if isinstance(recipe_data.get("instructions"), list):
         _seen_steps = set()
@@ -2500,10 +2565,11 @@ def lambda_handler(event, context):
         
         url = body.get('url', '')
         html = body.get('html', '')
+        html_source = body.get('html_source', 'main')  # STEP 0: Extract html_source (backward compatible)
         
         # Log request type
         if html:
-            print(f"LAMBDA/REQ: url+html")
+            print(f"LAMBDA/REQ: url+html source={html_source}")
         else:
             print(f"LAMBDA/REQ: url-only")
         
@@ -2742,7 +2808,7 @@ def lambda_handler(event, context):
         
         # Parse with BeautifulSoup (deterministic tier)
         soup = BeautifulSoup(html, 'html.parser')
-        recipe_data = extract_recipe_data(soup, url)
+        recipe_data = extract_recipe_data(soup, url, html_source)  # STEP 2: Pass html_source
         
         # Calculate quality score and completeness
         quality_score = calculate_quality_score(recipe_data)
@@ -3264,8 +3330,249 @@ def parse_iso8601_duration(duration_str):
     
     return None
 
-def extract_recipe_data(soup, url):
-    """Extract recipe data using BeautifulSoup patterns"""
+# ============================================================================
+# PRINT PAGE PARSING HELPERS (Print Pages Only)
+# ============================================================================
+
+def extract_print_page_ingredient_sections(soup):
+    """STEP 3: Extract ingredient sections from print pages
+    
+    Returns:
+        Optional[List[Dict]]: List of sections with name and ingredients, or None if not found
+    """
+    try:
+        sections = []
+        
+        # Find main ingredient container - common selectors for print pages
+        ingredient_containers = soup.find_all(['div', 'section'], class_=lambda x: x and (
+            'ingredient' in ' '.join(x).lower() or 
+            'recipe-ingredient' in ' '.join(x).lower()
+        ))
+        
+        if not ingredient_containers:
+            # Try finding any container with ingredient lists
+            ingredient_containers = soup.find_all(['div', 'section'], recursive=False)
+        
+        for container in ingredient_containers[:3]:  # Limit search to first 3 containers
+            # Look for headers (h2, h3, strong) followed by lists
+            headers = container.find_all(['h2', 'h3', 'strong'], recursive=False)
+            
+            for header in headers:
+                header_text = header.get_text(strip=True)
+                
+                # Validation rules
+                if not header_text or len(header_text) < 2 or len(header_text) > 50:
+                    continue
+                
+                # Must NOT start with a quantity (e.g., "2 cups" is not a section header)
+                if re.match(r'^\d+', header_text):
+                    continue
+                
+                # Find next sibling that is a list (ul or ol)
+                next_sibling = header.find_next_sibling(['ul', 'ol'])
+                if not next_sibling:
+                    # Try finding list in next few siblings
+                    for sibling in header.find_next_siblings(limit=3):
+                        if sibling.name in ['ul', 'ol']:
+                            next_sibling = sibling
+                            break
+                
+                if not next_sibling:
+                    continue
+                
+                # Extract ingredients from list
+                ingredients = []
+                for li in next_sibling.find_all('li', recursive=False):
+                    ingredient_text = li.get_text(strip=True)
+                    if ingredient_text and len(ingredient_text) > 2 and len(ingredient_text) < 200:
+                        ingredients.append(ingredient_text)
+                
+                # Section must have at least 2 ingredients
+                if len(ingredients) >= 2:
+                    sections.append({
+                        'name': header_text,
+                        'ingredients': ingredients
+                    })
+                    
+                    # Maximum 10 sections
+                    if len(sections) >= 10:
+                        break
+            
+            if sections:
+                break
+        
+        # Return None if no valid sections found (fallback to existing logic)
+        return sections if sections else None
+        
+    except Exception as e:
+        print(f"LAMBDA/PRINT: Ingredient section extraction error: {str(e)}")
+        return None
+
+def extract_print_page_instruction_groups(soup):
+    """STEP 5: Extract instruction groups with labels from print pages
+    
+    Returns:
+        Optional[List[Dict]]: List of groups with label and steps, or None if not found
+    """
+    try:
+        groups = []
+        
+        # Find main instruction container
+        instruction_containers = soup.find_all(['div', 'section'], class_=lambda x: x and (
+            'instruction' in ' '.join(x).lower() or 
+            'method' in ' '.join(x).lower() or
+            'direction' in ' '.join(x).lower()
+        ))
+        
+        if not instruction_containers:
+            instruction_containers = soup.find_all(['div', 'section'], recursive=False)
+        
+        for container in instruction_containers[:3]:  # Limit search
+            # Look for headers (h2, h3, strong) that might be instruction labels
+            headers = container.find_all(['h2', 'h3', 'strong'], recursive=False)
+            
+            current_label = None
+            current_steps = []
+            
+            for header in headers:
+                header_text = header.get_text(strip=True)
+                
+                # Validation: 3-60 characters, doesn't start with number
+                if not header_text or len(header_text) < 3 or len(header_text) > 60:
+                    continue
+                if re.match(r'^\d+', header_text):
+                    continue
+                
+                # Check if followed by instruction steps
+                # Look for ol/ul or divs with step-like content
+                next_sibling = header.find_next_sibling(['ol', 'ul', 'div'])
+                if not next_sibling:
+                    continue
+                
+                # Extract steps
+                steps = []
+                if next_sibling.name in ['ol', 'ul']:
+                    for li in next_sibling.find_all('li', recursive=False):
+                        step_text = li.get_text(strip=True)
+                        if step_text and len(step_text) > 10:
+                            steps.append(step_text)
+                elif next_sibling.name == 'div':
+                    # Try to find step-like content in div
+                    step_elements = next_sibling.find_all(['p', 'div'], class_=lambda x: x and 'step' in ' '.join(x).lower())
+                    for elem in step_elements:
+                        step_text = elem.get_text(strip=True)
+                        if step_text and len(step_text) > 10:
+                            steps.append(step_text)
+                
+                # Must have at least 1 step
+                if len(steps) >= 1:
+                    # Save previous group if exists
+                    if current_label and current_steps:
+                        groups.append({
+                            'label': current_label,
+                            'steps': current_steps
+                        })
+                    
+                    current_label = header_text
+                    current_steps = steps
+                    
+                    if len(groups) >= 10:  # Max 10 groups
+                        break
+            
+            # Save last group
+            if current_label and current_steps:
+                groups.append({
+                    'label': current_label,
+                    'steps': current_steps
+                })
+            
+            if groups:
+                break
+        
+        return groups if groups else None
+        
+    except Exception as e:
+        print(f"LAMBDA/PRINT: Instruction group extraction error: {str(e)}")
+        return None
+
+def extract_print_page_notes(soup):
+    """STEP 6: Extract recipe notes from print pages
+    
+    Returns:
+        Optional[str]: Notes text, or None if not found
+    """
+    try:
+        notes_sections = []
+        note_keywords = ['notes', 'make ahead', 'storage', 'tips', 'tip', 'note']
+        
+        # Find headers matching note keywords
+        headers = soup.find_all(['h2', 'h3'])
+        matching_headers = []
+        for header in headers:
+            header_text = header.get_text(strip=True).lower()
+            if any(keyword in header_text for keyword in note_keywords):
+                matching_headers.append(header)
+        
+        for header in matching_headers:
+            # Capture content until next major header (h1, h2, h3)
+            content_parts = []
+            current = header.find_next_sibling()
+            
+            while current:
+                if current.name in ['h1', 'h2', 'h3']:
+                    break
+                
+                if current.name in ['p', 'ul', 'ol', 'div']:
+                    text = current.get_text(strip=True)
+                    if text and len(text) > 5:
+                        content_parts.append(text)
+                
+                current = current.find_next_sibling()
+            
+            if content_parts:
+                notes_sections.append(' '.join(content_parts))
+        
+        # Combine all note sections
+        if notes_sections:
+            return ' '.join(notes_sections)
+        
+        return None
+        
+    except Exception as e:
+        print(f"LAMBDA/PRINT: Notes extraction error: {str(e)}")
+        return None
+
+def extract_recipe_data(soup, url, html_source='main'):
+    """Extract recipe data using BeautifulSoup patterns
+    
+    Args:
+        soup: BeautifulSoup parsed HTML
+        url: Recipe URL
+        html_source: Source of HTML ('print', 'jump-to-recipe', 'main', etc.) - STEP 2: Added parameter
+    """
+    
+    # STEP 2: Print page section extraction (if applicable)
+    ingredient_sections_raw = None
+    instruction_groups_raw = None
+    recipe_notes_raw = None
+    
+    if html_source == 'print':
+        try:
+            ingredient_sections_raw = extract_print_page_ingredient_sections(soup)
+            instruction_groups_raw = extract_print_page_instruction_groups(soup)
+            recipe_notes_raw = extract_print_page_notes(soup)
+            
+            if ingredient_sections_raw:
+                print(f"LAMBDA/PRINT: Detected {len(ingredient_sections_raw)} ingredient sections")
+                for section in ingredient_sections_raw:
+                    print(f"LAMBDA/PRINT: Section '{section['name']}': {len(section['ingredients'])} ingredients")
+            if instruction_groups_raw:
+                print(f"LAMBDA/PRINT: Detected {len(instruction_groups_raw)} instruction groups")
+            if recipe_notes_raw:
+                print(f"LAMBDA/PRINT: Captured recipe notes (length: {len(recipe_notes_raw)})")
+        except Exception as e:
+            print(f"LAMBDA/PRINT: Section extraction failed, falling back: {str(e)}")
+            # Fallback silently - continue with existing logic
     
     # Check if this is Food Network, Barefoot Contessa, or Food & Wine - prefer site-specific parser over JSON-LD
     from urllib.parse import urlparse
@@ -3649,11 +3956,29 @@ def extract_recipe_data(soup, url):
         # Extract title
         title = extract_title(soup)
         
-        # Extract ingredients
-        ingredients = extract_ingredients(soup)
+        # STEP 4: Extract ingredients - use sections if detected for print pages, otherwise use existing logic
+        # Only use sections if this is a print page AND sections were successfully extracted
+        # Site-specific parsers take priority, so sections are only used for generic extraction
+        if html_source == 'print' and ingredient_sections_raw:
+            # Flatten sections into flat ingredients list for compatibility
+            ingredients = []
+            for section in ingredient_sections_raw:
+                ingredients.extend(section['ingredients'])
+            print(f"LAMBDA/PRINT: Using {len(ingredients)} ingredients from {len(ingredient_sections_raw)} sections")
+        else:
+            # Use existing extraction logic (site-specific or generic)
+            ingredients = extract_ingredients(soup)
         
-        # Extract instructions (pass JSON-LD instructions for deduplication if available)
-        instructions = extract_instructions(soup, existing_instructions=json_ld_instructions_for_dedup if json_ld_instructions_for_dedup else None)
+        # STEP 5: Extract instructions - use groups if detected for print pages, otherwise use existing logic
+        if html_source == 'print' and instruction_groups_raw:
+            # Flatten instruction groups into flat instructions list for compatibility
+            instructions = []
+            for group in instruction_groups_raw:
+                instructions.extend(group['steps'])
+            print(f"LAMBDA/PRINT: Using {len(instructions)} instructions from {len(instruction_groups_raw)} groups")
+        else:
+            # Use existing extraction logic (pass JSON-LD instructions for deduplication if available)
+            instructions = extract_instructions(soup, existing_instructions=json_ld_instructions_for_dedup if json_ld_instructions_for_dedup else None)
         
         # Extract servings, prep time, image
         servings = extract_servings(soup)
@@ -3758,6 +4083,15 @@ def extract_recipe_data(soup, url):
         print(f"LAMBDA/RESULT: Added nutrition to response - calories: {nutrition.get('calories')}, source: {nutrition.get('source', 'html')}")
     else:
         print("LAMBDA/RESULT: No nutrition data to add to response")
+    
+    # STEP 2: Add print page sections (if extracted earlier)
+    if html_source == 'print':
+        if ingredient_sections_raw:
+            result['ingredient_sections'] = ingredient_sections_raw
+        if instruction_groups_raw:
+            result['instruction_groups'] = instruction_groups_raw
+        if recipe_notes_raw:
+            result['recipe_notes'] = recipe_notes_raw
     
     return result
 

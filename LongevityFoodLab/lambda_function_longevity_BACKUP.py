@@ -3887,40 +3887,33 @@ def json_ld_is_incomplete(recipe):
     ingredients_lower = [str(ing).lower() for ing in ingredients]
     instructions_lower = [str(inst).lower() for inst in instructions]
     
-    # Detect frosting-signal ingredients (semantic detection)
-    frosting_ingredient_signals = [
-        "cream cheese",
-        "confectioners sugar",
-        "confectioner's sugar",
-        "powdered sugar",
-        "icing sugar"
-    ]
-    
-    # Check for butter + sugar combination (common in frosting)
+    # SIMPLE and SAFE frosting ingredient detection
+    # Rule 1: Check for ANY TWO of: cream cheese, butter, powdered sugar/confectioners
+    has_cream_cheese = any("cream cheese" in ing for ing in ingredients_lower)
     has_butter = any("butter" in ing for ing in ingredients_lower)
-    has_sugar = any("sugar" in ing and ("confectioner" in ing or "powdered" in ing or "icing" in ing) for ing in ingredients_lower)
-    butter_sugar_combo = has_butter and has_sugar
+    has_powdered_sugar = any("powdered sugar" in ing or "confectioners" in ing or "confectioner's" in ing for ing in ingredients_lower)
     
-    # Check for explicit frosting ingredients
-    has_frosting_ingredient = any(
-        any(signal in ing for signal in frosting_ingredient_signals)
-        for ing in ingredients_lower
-    ) or butter_sugar_combo
+    # Count how many of the three key ingredients are present
+    frosting_key_ingredients_count = sum([has_cream_cheese, has_butter, has_powdered_sugar])
+    has_two_frosting_keys = frosting_key_ingredients_count >= 2
     
-    # Check for frosting terms in ingredients (explicit mentions)
-    frosting_terms_ingredients = ["frost", "icing", "buttercream", "ganache", "frosting"]
-    has_explicit_frosting_ingredient = any(
-        any(term in ing for term in frosting_terms_ingredients)
+    # Rule 2: Check for explicit frosting terms
+    frosting_explicit_terms = ["buttercream", "icing", "frosting"]
+    has_explicit_frosting_term = any(
+        any(term in ing for term in frosting_explicit_terms)
         for ing in ingredients_lower
     )
     
-    # Combined frosting ingredient detection
-    frosting_ingredients_present = has_frosting_ingredient or has_explicit_frosting_ingredient
+    # Combined frosting ingredient detection (simpler and safer)
+    frosting_ingredients_present = has_two_frosting_keys or has_explicit_frosting_term
     
-    # Check for frosting instructions (broader detection)
+    # Check for frosting instructions (simple detection)
     frosting_instruction_terms = [
-        "frost", "frosting", "icing", "buttercream", "ganache",
-        "cream cheese"  # For cream cheese frosting
+        "frost",
+        "frosting",
+        "icing",
+        "buttercream",
+        "cream cheese frosting"
     ]
     
     has_frosting_instruction = any(
@@ -3935,6 +3928,7 @@ def json_ld_is_incomplete(recipe):
             return True
         # Frosting ingredients present but no frosting instructions = incomplete
         if not has_frosting_instruction:
+            print("JSON-LD INCOMPLETE — FROSTING STEP MISSING")
             return True
     else:
         # Single-part recipes: standard threshold

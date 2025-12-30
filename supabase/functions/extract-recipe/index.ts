@@ -38,7 +38,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey)
 
     // Parse request body
-    const { url, html } = await req.json()
+    const { url, html, html_source } = await req.json()
     
     if (!url) {
       return new Response(
@@ -97,95 +97,103 @@ serve(async (req) => {
     const timeoutId = setTimeout(() => controller.abort(), 85000) // 85 seconds (less than 90s Lambda timeout)
     
     try {
-    const lambdaResponse = await fetch(LAMBDA_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ url, html: html || '' }),
+      const lambdaResponse = await fetch(LAMBDA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          url, 
+          html: html || '', 
+          html_source: html_source || 'main'  // Forward html_source to Lambda for print page parsing
+        }),
         signal: controller.signal,
-    })
+      })
       
       clearTimeout(timeoutId)
 
-    if (!lambdaResponse.ok) {
-      throw new Error(`Lambda error: ${lambdaResponse.status}`)
-    }
+      if (!lambdaResponse.ok) {
+        throw new Error(`Lambda error: ${lambdaResponse.status}`)
+      }
 
-    const recipeData = await lambdaResponse.json()
+      const recipeData = await lambdaResponse.json()
 
-    // Check if Lambda returned an error
-    if (recipeData.error) {
-      // Log failed extraction
+      // Check if Lambda returned an error
+      if (recipeData.error) {
+        // Log failed extraction
+        await supabase.from('extraction_logs').insert({
+          source_url: url,
+          platform: detectPlatform(url),
+          requested_at: new Date().toISOString(),
+          success: false,
+          error_message: recipeData.error,
+          extraction_time_ms: Date.now() - startTime,
+          cache_hit: false
+        })
+
+        return new Response(
+          JSON.stringify(recipeData),
+          {
+            status: 200, // Lambda returns 200 with error in body
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            }
+          }
+        )
+      }
+
+      // Step 3: Save to cache
+      console.log('Saving recipe to cache...')
+      const platform = detectPlatform(url)
+      const videoId = extractVideoId(url)
+      
+      const { data: cacheId, error: saveError } = await supabase
+        .rpc('save_recipe_to_cache', {
+          p_source_url: url,
+          p_platform: platform,
+          p_video_id: videoId,
+          p_recipe_data: recipeData,
+          p_tier_used: recipeData.metadata?.tier_used || 'unknown',
+          p_quality_score: recipeData.quality_score || 0.0
+        })
+
+      if (saveError) {
+        console.error('Error saving to cache:', saveError)
+        // Continue anyway - return recipe even if cache save fails
+      }
+
+      // Log successful extraction
       await supabase.from('extraction_logs').insert({
         source_url: url,
-        platform: detectPlatform(url),
+        platform: platform,
         requested_at: new Date().toISOString(),
-        success: false,
-        error_message: recipeData.error,
+        success: true,
+        tier_used: recipeData.metadata?.tier_used || 'unknown',
+        quality_score: recipeData.quality_score || 0.0,
         extraction_time_ms: Date.now() - startTime,
-        cache_hit: false
+        cache_hit: false,
+        cache_id: cacheId || null
       })
 
+      // Return recipe
       return new Response(
-        JSON.stringify(recipeData),
+        JSON.stringify({
+          ...recipeData,
+          cached: false
+        }),
         {
-          status: 200, // Lambda returns 200 with error in body
+          status: 200,
           headers: { 
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*'
           }
         }
       )
+    } catch (lambdaError) {
+      clearTimeout(timeoutId)
+      throw lambdaError
     }
-
-    // Step 3: Save to cache
-    console.log('Saving recipe to cache...')
-    const platform = detectPlatform(url)
-    const videoId = extractVideoId(url)
-    
-    const { data: cacheId, error: saveError } = await supabase
-      .rpc('save_recipe_to_cache', {
-        p_source_url: url,
-        p_platform: platform,
-        p_video_id: videoId,
-        p_recipe_data: recipeData,
-        p_tier_used: recipeData.metadata?.tier_used || 'unknown',
-        p_quality_score: recipeData.quality_score || 0.0
-      })
-
-    if (saveError) {
-      console.error('Error saving to cache:', saveError)
-      // Continue anyway - return recipe even if cache save fails
-    }
-
-    // Log successful extraction
-    await supabase.from('extraction_logs').insert({
-      source_url: url,
-      platform: platform,
-      requested_at: new Date().toISOString(),
-      success: true,
-      tier_used: recipeData.metadata?.tier_used || 'unknown',
-      quality_score: recipeData.quality_score || 0.0,
-      extraction_time_ms: Date.now() - startTime,
-      cache_hit: false,
-      cache_id: cacheId || null
-    })
-
-    // Return recipe
-    return new Response(
-      JSON.stringify({
-        ...recipeData,
-        cached: false
-      }),
-      {
-        status: 200,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      }
-    )
 
   } catch (error) {
     console.error('Error:', error)

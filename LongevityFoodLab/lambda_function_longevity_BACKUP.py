@@ -2109,6 +2109,15 @@ def finalize_response(recipe_data, url):
     print("FINALIZE_RESPONSE ENTRY MARKER - FUNCTION CALLED")
     import re, html as _html
     
+    # Track if this is an AI result (should not be truncated or filtered aggressively)
+    is_ai_result = recipe_data.get('metadata', {}).get('tier_used') == 'ai'
+    if is_ai_result:
+        print(f"LAMBDA/FINALIZE: AI result detected — preserving all instructions")
+    
+    # Log instruction count BEFORE finalization
+    instructions_before = len(recipe_data.get('instructions', []))
+    print(f"LAMBDA/DEBUG: instructions BEFORE finalize = {instructions_before}")
+    
     # Compile regex once for efficiency
     LIST_PREFIX = re.compile(r'^\s*(?:\d+\s*[\.\)]\s*|[-–—•●*·]\s+)', re.UNICODE)
     
@@ -2280,6 +2289,7 @@ def finalize_response(recipe_data, url):
             recipe_data.pop("recipe_notes", None)
     
     # Clean instructions with improved deduplication
+    # CRITICAL: For AI results, only do light normalization (no aggressive deduplication)
     if isinstance(recipe_data.get("instructions"), list):
         _seen_steps = set()
         cleaned_steps = []
@@ -2292,28 +2302,36 @@ def finalize_response(recipe_data, url):
                 normalized = re.sub(r'\s+', ' ', normalized).strip()  # Normalize whitespace
                 normalized = re.sub(r'[.,;:!?]+$', '', normalized)  # Remove trailing punctuation for comparison
                 
-                # Check for exact duplicates first (most strict check)
+                # For AI results, only check exact duplicates (preserve all instructions)
+                # For deterministic results, use aggressive deduplication
                 is_duplicate = False
-                if normalized in _seen_steps:
-                    is_duplicate = True
-                    print(f"LAMBDA/DEDUP: Found exact duplicate instruction: {normalized[:50]}...")
+                if is_ai_result:
+                    # AI results: only exact duplicates
+                    if normalized in _seen_steps:
+                        is_duplicate = True
+                        print(f"LAMBDA/DEDUP: Found exact duplicate instruction (AI): {normalized[:50]}...")
                 else:
-                    # Then check for near-duplicates (similarity check) - existing logic
-                    for seen in _seen_steps:
-                        # Check if normalized text is very similar (accounting for minor variations)
-                        if normalized == seen or (len(normalized) > 20 and normalized in seen) or (len(seen) > 20 and seen in normalized):
-                            is_duplicate = True
-                            print(f"LAMBDA/DEDUP: Found near-duplicate instruction: {normalized[:50]}...")
-                            break
-                        # Additional check: if they're very similar length and mostly the same
-                        if abs(len(normalized) - len(seen)) < 10 and len(normalized) > 15:
-                            # Check character similarity (simple ratio)
-                            common_chars = sum(1 for a, b in zip(normalized, seen) if a == b)
-                            similarity = common_chars / max(len(normalized), len(seen)) if max(len(normalized), len(seen)) > 0 else 0
-                            if similarity > 0.85:  # 85% similar (slightly more strict than before)
+                    # Deterministic results: check for exact duplicates first (most strict check)
+                    if normalized in _seen_steps:
+                        is_duplicate = True
+                        print(f"LAMBDA/DEDUP: Found exact duplicate instruction: {normalized[:50]}...")
+                    else:
+                        # Then check for near-duplicates (similarity check) - existing logic
+                        for seen in _seen_steps:
+                            # Check if normalized text is very similar (accounting for minor variations)
+                            if normalized == seen or (len(normalized) > 20 and normalized in seen) or (len(seen) > 20 and seen in normalized):
                                 is_duplicate = True
-                                print(f"LAMBDA/DEDUP: Found similar instruction (similarity: {similarity:.2f}): {normalized[:50]}...")
+                                print(f"LAMBDA/DEDUP: Found near-duplicate instruction: {normalized[:50]}...")
                                 break
+                            # Additional check: if they're very similar length and mostly the same
+                            if abs(len(normalized) - len(seen)) < 10 and len(normalized) > 15:
+                                # Check character similarity (simple ratio)
+                                common_chars = sum(1 for a, b in zip(normalized, seen) if a == b)
+                                similarity = common_chars / max(len(normalized), len(seen)) if max(len(normalized), len(seen)) > 0 else 0
+                                if similarity > 0.85:  # 85% similar (slightly more strict than before)
+                                    is_duplicate = True
+                                    print(f"LAMBDA/DEDUP: Found similar instruction (similarity: {similarity:.2f}): {normalized[:50]}...")
+                                    break
                 
                 if not is_duplicate:
                     cleaned_steps.append(c)
@@ -2327,7 +2345,7 @@ def finalize_response(recipe_data, url):
         original_count = len(recipe_data["instructions"])
         cleaned_count = len(cleaned_steps)
         if original_count > cleaned_count:
-            print(f"LAMBDA/DEDUP: Removed {original_count - cleaned_count} duplicate instruction(s)")
+            print(f"LAMBDA/DEDUP: Removed {original_count - cleaned_count} duplicate instruction(s) (is_ai={is_ai_result})")
         
         recipe_data["instructions"] = cleaned_steps
     
@@ -2498,6 +2516,18 @@ def finalize_response(recipe_data, url):
             print(f"LAMBDA/FINAL: Nutrition validation complete - calories: {nutrition.get('calories')}")
     else:
         print("LAMBDA/FINAL: No nutrition data to validate")
+    
+    # Log instruction count AFTER finalization (before sending to app)
+    instructions_after = len(recipe_data.get('instructions', []))
+    print(f"LAMBDA/DEBUG: instructions AFTER finalize = {instructions_after}")
+    print(f"LAMBDA/FINAL: instruction count sent to app = {instructions_after}")
+    
+    # Guard: Ensure AI tier is preserved
+    if is_ai_result:
+        tier_used = recipe_data.get('metadata', {}).get('tier_used', 'unknown')
+        if tier_used != 'ai':
+            print(f"LAMBDA/ERROR: AI result tier was changed to '{tier_used}' — restoring to 'ai'")
+            recipe_data['metadata']['tier_used'] = 'ai'
     
     # Return response
     return {
@@ -2809,6 +2839,27 @@ def lambda_handler(event, context):
         # Parse with BeautifulSoup (deterministic tier)
         soup = BeautifulSoup(html, 'html.parser')
         recipe_data = extract_recipe_data(soup, url, html_source)  # STEP 2: Pass html_source
+        
+        # CRITICAL: Check if extract_recipe_data returned an AI result (from print page fallback)
+        # AI results are marked with metadata['tier_used'] = 'ai' and should bypass deterministic logic
+        is_ai_result = recipe_data.get('metadata', {}).get('tier_used') == 'ai'
+        if is_ai_result:
+            print(f"LAMBDA/PARSE: AI result detected from extract_recipe_data — bypassing deterministic tier")
+            print(f"LAMBDA/DEBUG: AI instructions BEFORE finalize = {len(recipe_data.get('instructions', []))}")
+            # Calculate quality score for logging
+            quality_score = calculate_quality_score(recipe_data)
+            recipe_data['quality_score'] = quality_score
+            # Ensure tier is set correctly (should already be set, but guard against overwrite)
+            if 'metadata' not in recipe_data:
+                recipe_data['metadata'] = {}
+            recipe_data['metadata']['tier_used'] = 'ai'
+            print(f"LAMBDA/OUT: tier_used=ai score={quality_score:.2f}")
+            try:
+                _dur = int((time.time() - start_time) * 1000)
+                _log_tier("ai", url, missing_fields=None, quality=quality_score, duration_ms=_dur)
+            except Exception:
+                pass
+            return finalize_response(recipe_data, url)
         
         # Calculate quality score and completeness
         quality_score = calculate_quality_score(recipe_data)
@@ -4335,6 +4386,12 @@ def extract_recipe_data(soup, url, html_source='main'):
                 sections_detected = sum([True, frosting_section, assembly_section])  # Base + frosting + assembly
                 print(f"LAMBDA/PRINT: AI EXTRACTION COMPLETE — instructions={ai_instruction_count} sections={sections_detected}")
                 # AI result replaces ALL print-page parsing
+                # Mark as AI result so lambda_handler() treats it correctly
+                if 'metadata' not in ai_result:
+                    ai_result['metadata'] = {}
+                ai_result['metadata']['tier_used'] = 'ai'
+                ai_result['metadata']['source'] = 'ai_print_fallback'
+                print(f"LAMBDA/PRINT: AI result marked with tier_used=ai, instructions={ai_instruction_count}")
                 # Return early with AI result
                 return ai_result
             else:

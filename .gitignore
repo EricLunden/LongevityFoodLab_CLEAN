@@ -174,3 +174,8 @@ get_refresh_token*.py
 xcuserdata/
 ~/
 usda_data/FoodData_Central_sr_legacy_food_json_2018-04.json
+
+# Lambda build packages
+lambda-package-*/
+lambda_build/
+*.zip

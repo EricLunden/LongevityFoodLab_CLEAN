@@ -43,6 +43,14 @@ if "_log_tier" not in globals():
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Tuple
 
+# ---- Recipe-Scrapers Tier-0 Fast Exit ----
+try:
+    from recipe_scrapers import scrape_me
+    RECIPE_SCRAPERS_AVAILABLE = True
+except ImportError:
+    RECIPE_SCRAPERS_AVAILABLE = False
+    print("LAMBDA/WARN: recipe-scrapers not available, Tier-0 fast exit disabled")
+
 # ---- Force Requests to use the system CA bundle BEFORE importing requests ----
 # Prefer Amazon Linux system bundle paths
 _SYSTEM_CA_CANDIDATES = [
@@ -2541,6 +2549,178 @@ def finalize_response(recipe_data, url):
         'body': json.dumps(recipe_data)
     }
 
+# ============================================================================
+# TIER-0: RECIPE-SCRAPERS FAST EXIT (Restores Dec 23 speed + accuracy)
+# ============================================================================
+
+# ============================================================================
+# STEP A: HARD FULL-FETCH GATE (MANDATORY)
+# ============================================================================
+
+MIN_HTML_BYTES = 20000
+
+def needs_full_fetch(html):
+    """
+    Check if inbound HTML is missing or insufficient.
+    Returns True if we MUST fetch full HTML server-side.
+    """
+    if not html:
+        return True  # No HTML provided, need to fetch
+    
+    html_len = len(html) if html else 0
+    
+    # Suspiciously small HTML (< 20KB)
+    if html_len < MIN_HTML_BYTES:
+        return True
+    
+    html_lower = html.lower() if html else ""
+    
+    # Missing essential HTML structure
+    if "<html" not in html_lower:
+        return True
+    
+    # Missing script tags (indicates fragment, not full page)
+    if "<script" not in html_lower:
+        return True
+    
+    return False
+
+def fetch_full_html(url):
+    """
+    Fetch full HTML from URL with realistic headers.
+    Returns (html, success) tuple.
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        if response.status_code == 200:
+            html = response.text
+            print(f"LAMBDA/FETCH: fetched_full_html len={len(html)}")
+            return html, True
+        else:
+            print(f"LAMBDA/FETCH: fetch_failed status={response.status_code}")
+            return None, False
+    except Exception as e:
+        print(f"LAMBDA/FETCH: fetch_error={str(e)}")
+        return None, False
+
+def try_recipe_scrapers(url):
+    """
+    Tier-0 fast exit using recipe-scrapers library.
+    This restores sub-2s imports for major recipe sites and prevents AI rewriting.
+    
+    Returns recipe dict if successful, None otherwise.
+    """
+    if not RECIPE_SCRAPERS_AVAILABLE:
+        return None
+    
+    if not url or not isinstance(url, str):
+        return None
+    
+    try:
+        scraper = scrape_me(url, wild_mode=True)
+        
+        # Extract instructions as list (recipe-scrapers returns list)
+        instructions = scraper.instructions_list()
+        
+        # Only return if we have meaningful instructions (>= 3 steps)
+        if instructions and len(instructions) >= 3:
+            # Extract other fields
+            title = scraper.title()
+            ingredients = scraper.ingredients()
+            image = scraper.image()
+            yields = scraper.yields()
+            
+            # Parse time fields if available
+            prep_time = scraper.prep_time()
+            cook_time = scraper.cook_time()
+            total_time = scraper.total_time()
+            
+            # Build response dict matching our format
+            result = {
+                "title": title or "Untitled Recipe",
+                "ingredients": ingredients or [],
+                "instructions": instructions,  # Already a list
+                "image": image or "",
+                "servings": yields,  # recipe-scrapers returns string like "4 servings"
+                "source_url": url,
+                "site_link": url,
+                "metadata": {
+                    "tier_used": "recipe_scrapers",
+                    "source": "recipe-scrapers",
+                    "full_page_fetch": True
+                }
+            }
+            
+            # Map time fields if available
+            if prep_time:
+                # Try to parse prep_time (could be string like "15 minutes" or "15 min")
+                try:
+                    prep_minutes = parse_time_to_minutes(prep_time)
+                    if prep_minutes:
+                        result['prep_time_minutes'] = prep_minutes
+                except:
+                    pass
+            
+            if cook_time:
+                try:
+                    cook_minutes = parse_time_to_minutes(cook_time)
+                    if cook_minutes:
+                        result['cook_time_minutes'] = cook_minutes
+                except:
+                    pass
+            
+            if total_time:
+                try:
+                    total_minutes = parse_time_to_minutes(total_time)
+                    if total_minutes:
+                        result['total_time_minutes'] = total_minutes
+                except:
+                    pass
+            
+            print(f"LAMBDA/TIER0: recipe-scrapers success steps={len(instructions)} ing={len(ingredients)}")
+            return result
+        else:
+            print(f"LAMBDA/TIER0: recipe-scrapers insufficient steps={len(instructions) if instructions else 0}")
+            return None
+            
+    except Exception as e:
+        print(f"LAMBDA/TIER0: recipe-scrapers failed: {str(e)}")
+        return None
+
+def parse_time_to_minutes(time_str):
+    """Parse time string like '15 minutes' or '1 hour 30 minutes' to minutes."""
+    if not time_str:
+        return None
+    
+    time_str = str(time_str).lower().strip()
+    total_minutes = 0
+    
+    # Extract hours
+    hour_match = re.search(r'(\d+)\s*h(?:our)?s?', time_str)
+    if hour_match:
+        total_minutes += int(hour_match.group(1)) * 60
+    
+    # Extract minutes
+    min_match = re.search(r'(\d+)\s*m(?:in(?:ute)?s?)?', time_str)
+    if min_match:
+        total_minutes += int(min_match.group(1))
+    
+    # If no matches but has a number, assume minutes
+    if total_minutes == 0:
+        num_match = re.search(r'(\d+)', time_str)
+        if num_match:
+            total_minutes = int(num_match.group(1))
+    
+    return total_minutes if total_minutes > 0 else None
+
 def lambda_handler(event, context):
     """Lambda handler with Tier-4 AI fallback for recipe extraction"""
     print(f"LAMBDA/BOOT: build={BUILD_ID}")
@@ -2771,6 +2951,66 @@ def lambda_handler(event, context):
                     'body': json.dumps({'error': f'TikTok extraction failed: {str(e)}', 'quality_score': 0.0, 'reason': 'tiktok_extraction_failed'})
                 }
         
+        # ========================================================================
+        # STEP B: ROUTE OUT YOUTUBE / TIKTOK (UNCHANGED)
+        # ========================================================================
+        print(f"LAMBDA/ROUTE: youtube={1 if youtube_check_result else 0} tiktok={1 if tiktok_check_result else 0} → web_pipeline")
+        
+        # ========================================================================
+        # STEP A: HARD FULL-FETCH GATE (MANDATORY - Before any extraction)
+        # ========================================================================
+        # If inbound HTML is missing OR too small, fetch full page before anything else
+        print(f"LAMBDA/INBOUND: html_len={len(html) if html else 0}")
+        
+        if needs_full_fetch(html):
+            print("LAMBDA/FETCH: inbound html insufficient — fetching full page")
+            fetched_html, fetch_success = fetch_full_html(url)
+            if fetch_success and fetched_html:
+                html = fetched_html
+                print(f"LAMBDA/FETCH: fetched_html_len={len(html)}")
+            else:
+                print("LAMBDA/FETCH: fetch_failed — continuing with inbound HTML (AI still last resort)")
+        
+        # ========================================================================
+        # STEP C: TIER-0 RECIPE-SCRAPERS (FAST EXIT)
+        # ========================================================================
+        # Run Tier-0 for all normal web pages, even if HTML was provided
+        # Tier-0 MUST run after full fetch if HTML was small
+        if url and not youtube_check_result and not tiktok_check_result:
+            print("LAMBDA/TIER0: recipe-scrapers start")
+            tier0 = try_recipe_scrapers(url)
+            
+            if tier0 and has_meaningful_instructions(tier0.get("instructions", [])):
+                print("LAMBDA/TIER0: success — FAST EXIT")
+                
+                # Calculate quality score for logging
+                quality_score = calculate_quality_score(tier0)
+                tier0['quality_score'] = quality_score
+                
+                # Ensure all required fields
+                if 'prep_time_minutes' not in tier0:
+                    tier0['prep_time_minutes'] = 0
+                if 'cook_time_minutes' not in tier0:
+                    tier0['cook_time_minutes'] = 0
+                if 'total_time_minutes' not in tier0:
+                    tier0['total_time_minutes'] = 0
+                if 'site_name' not in tier0:
+                    tier0['site_name'] = extract_site_name(url)
+                
+                # Comprehensive logging
+                instructions_count = len(tier0.get('instructions', []))
+                ingredients_count = len(tier0.get('ingredients', []))
+                print(f"LAMBDA/OUT: tier_used=tier0 url={url[:100]} html_len={len(html) if html else 0} steps={instructions_count} ing={ingredients_count} ai_ran=0 score={quality_score:.2f}")
+                try:
+                    _dur = int((time.time() - start_time) * 1000)
+                    _log_tier("tier0", url, missing_fields=None, quality=quality_score, duration_ms=_dur)
+                except Exception:
+                    pass
+                
+                return finalize_response(tier0, url)
+            else:
+                print("LAMBDA/TIER0: failed or insufficient — continuing to deterministic extraction")
+        
         # ---- early Spoonacular try when no HTML ----
         ai_enabled = os.environ.get('AI_TIER_ENABLED', 'false').lower() == 'true'
         min_trigger_score = float(os.environ.get('AI_MIN_TRIGGER_SCORE', '0.60'))
@@ -2794,16 +3034,16 @@ def lambda_handler(event, context):
                     pass
                 return finalize_response(spn, url)
         
-        # Fetch HTML if not provided
+        # Fetch HTML if not provided (or if we haven't already fetched it)
         if not html:
             try:
-                response = requests.get(
-                    url,
-                    timeout=10,
-                    headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-                )
-                html = response.text
-                print(f"LAMBDA/HTML: fetched ok bytes={len(html)}")
+                fetched_html, fetch_success = fetch_full_html(url)
+                if fetch_success:
+                    html = fetched_html
+                    html_was_fetched = True
+                    print(f"LAMBDA/HTML: fetched ok bytes={len(html)}")
+                else:
+                    raise Exception("Failed to fetch HTML")
             except Exception as e:
                 print(f"LAMBDA/HTML: fetch error={str(e)}")
                 
@@ -2816,7 +3056,9 @@ def lambda_handler(event, context):
                             spn['metadata'] = {}
                         spn['metadata']['tier_used'] = 'spoonacular'
                         spn["quality_score"] = calculate_quality_score(spn)
-                        print(f"LAMBDA/OUT: tier_used=spoonacular score={calculate_quality_score(spn):.2f}")
+                        instructions_count = len(spn.get('instructions', []))
+                        ingredients_count = len(spn.get('ingredients', []))
+                        print(f"LAMBDA/OUT: tier_used=spoonacular url={url[:100]} html_len=0 steps={instructions_count} ing={ingredients_count} ai_ran=0 score={calculate_quality_score(spn):.2f}")
                         try:
                             _dur = int((time.time() - start_time) * 1000)
                             _log_tier("spoonacular", url, missing_fields=None, quality=spn.get("quality_score"), duration_ms=_dur)
@@ -2853,10 +3095,42 @@ def lambda_handler(event, context):
             if 'metadata' not in recipe_data:
                 recipe_data['metadata'] = {}
             recipe_data['metadata']['tier_used'] = 'ai'
-            print(f"LAMBDA/OUT: tier_used=ai score={quality_score:.2f}")
+            instructions_count = len(recipe_data.get('instructions', []))
+            ingredients_count = len(recipe_data.get('ingredients', []))
+            print(f"LAMBDA/OUT: tier_used=ai url={url[:100]} html_len={len(html) if html else 0} steps={instructions_count} ing={ingredients_count} ai_ran=1 score={quality_score:.2f}")
             try:
                 _dur = int((time.time() - start_time) * 1000)
                 _log_tier("ai", url, missing_fields=None, quality=quality_score, duration_ms=_dur)
+            except Exception:
+                pass
+            return finalize_response(recipe_data, url)
+        
+        # ========================================================================
+        # STEP E: EARLY RETURN BEFORE QUALITY GATE (CRITICAL)
+        # ========================================================================
+        # If meaningful instructions exist, they are authoritative - return immediately
+        # This must happen BEFORE quality gate, Spoonacular, and AI
+        instructions = recipe_data.get('instructions', [])
+        if has_meaningful_instructions(instructions):
+            print("LAMBDA/EARLY_RETURN: real instructions present — skipping quality gate & AI")
+            
+            # Calculate quality score for logging
+            quality_score = calculate_quality_score(recipe_data)
+            recipe_data['quality_score'] = quality_score
+            
+            # Set metadata
+            if 'metadata' not in recipe_data:
+                recipe_data['metadata'] = {}
+            recipe_data['metadata']['tier_used'] = 'deterministic'
+            recipe_data['metadata']['source'] = 'html_early_return'
+            
+            # Comprehensive logging
+            instructions_count = len(recipe_data.get('instructions', []))
+            ingredients_count = len(recipe_data.get('ingredients', []))
+            print(f"LAMBDA/OUT: tier_used=deterministic url={url[:100]} html_len={len(html) if html else 0} steps={instructions_count} ing={ingredients_count} ai_ran=0 score={quality_score:.2f}")
+            try:
+                _dur = int((time.time() - start_time) * 1000)
+                _log_tier("deterministic", url, missing_fields=None, quality=quality_score, duration_ms=_dur)
             except Exception:
                 pass
             return finalize_response(recipe_data, url)
@@ -2944,7 +3218,57 @@ def lambda_handler(event, context):
         missing_fields = [field for field in ['title', 'image', 'ingredients', 'instructions'] if not best_base.get(field)]
         needs_ai = fields_needing_ai or missing_fields or (quality_score < min_trigger_score)
         
-        # Check if AI fallback should be triggered (only if Spoonacular didn't improve quality enough)
+        # STEP 2: DEFENSIVE AI GATE - Backup check in case instructions were added by spoonacular
+        # This is a secondary check (primary check happens earlier after extract_recipe_data)
+        # Prevents AI from rewriting or replacing real recipe instructions
+        instructions = best_base.get('instructions', [])
+        if has_meaningful_instructions(instructions):
+            # Real instructions exist - skip AI entirely
+            debug_mode = os.environ.get('DEBUG_MODE', '0') == '1'
+            if debug_mode:
+                print(f"LAMBDA/DEBUG: AI SKIPPED — REAL INSTRUCTIONS PRESENT (defensive check) | count={len(instructions)} source=html")
+            print("LAMBDA/PARSE: AI SKIPPED — REAL INSTRUCTIONS PRESENT (defensive check)")
+            # Ensure metadata is set
+            if 'metadata' not in recipe_data:
+                recipe_data['metadata'] = {}
+            recipe_data['metadata']['tier_used'] = 'deterministic'
+            # Skip AI fallback entirely
+            needs_ai = False
+        
+        # ========================================================================
+        # STEP G: AI GATE (FINAL BACKSTOP)
+        # ========================================================================
+        # Immediately before any AI call - check if instructions already exist
+        if has_meaningful_instructions(best_base.get("instructions", [])):
+            print("LAMBDA/AI_SKIP: instructions already exist")
+            # Ensure metadata is set
+            if 'metadata' not in best_base:
+                best_base['metadata'] = {}
+            best_base['metadata']['tier_used'] = 'deterministic'
+            quality_score = calculate_quality_score(best_base)
+            best_base['quality_score'] = quality_score
+            instructions_count = len(best_base.get('instructions', []))
+            ingredients_count = len(best_base.get('ingredients', []))
+            print(f"LAMBDA/OUT: tier_used=deterministic url={url[:100]} html_len={len(html) if html else 0} steps={instructions_count} ing={ingredients_count} ai_ran=0 score={quality_score:.2f}")
+            try:
+                _dur = int((time.time() - start_time) * 1000)
+                _log_tier("deterministic", url, missing_fields=None, quality=quality_score, duration_ms=_dur)
+            except Exception:
+                pass
+            return finalize_response(best_base, url)
+        
+        # AI kill switch (environment variable)
+        if os.environ.get("DISABLE_AI") == "1":
+            print("LAMBDA/AI_DISABLED")
+            # Ensure metadata is set
+            if 'metadata' not in best_base:
+                best_base['metadata'] = {}
+            best_base['metadata']['tier_used'] = 'deterministic'
+            quality_score = calculate_quality_score(best_base)
+            best_base['quality_score'] = quality_score
+            return finalize_response(best_base, url)
+        
+        # Check if AI fallback should be triggered (only if Spoonacular didn't improve quality enough AND instructions are missing)
         if ai_enabled and needs_ai:
             print("LAMBDA/PARSE: ai-fallback start")
             
@@ -2964,7 +3288,9 @@ def lambda_handler(event, context):
                     # Log what AI accomplished
                     fields_missing_before = len([f for f in ['title', 'image', 'ingredients', 'instructions'] if not best_base.get(f)])
                     fields_filled_by_ai = len([f for f in ['title', 'image', 'ingredients', 'instructions'] if not best_base.get(f) and recipe_data.get(f)])
-                    print(f"LAMBDA/OUT: tier_used=ai_fallback score={quality_score:.2f} fields_missing_before={fields_missing_before} fields_filled_by_ai={fields_filled_by_ai}")
+                    instructions_count = len(recipe_data.get('instructions', []))
+                    ingredients_count = len(recipe_data.get('ingredients', []))
+                    print(f"LAMBDA/OUT: tier_used=ai_fallback url={url[:100]} html_len={len(html) if html else 0} steps={instructions_count} ing={ingredients_count} ai_ran=1 score={quality_score:.2f} fields_missing_before={fields_missing_before} fields_filled_by_ai={fields_filled_by_ai}")
                 else:
                     print("LAMBDA/PARSE: ai-fallback error=no_result")
                     if 'metadata' not in recipe_data:
@@ -2982,13 +3308,15 @@ def lambda_handler(event, context):
                 recipe_data['metadata'] = {}
             recipe_data['metadata']['tier_used'] = 'deterministic'
         
-        # Final logging
+        # Final logging with comprehensive format
         final_ingredients = len(recipe_data.get('ingredients', []))
         final_instructions = len(recipe_data.get('instructions', []))
         final_full_recipe = final_ingredients >= 3 and final_instructions >= 3
+        tier_used = recipe_data.get('metadata', {}).get('tier_used', 'deterministic')
+        ai_ran = 1 if tier_used == 'ai_fallback' or tier_used == 'ai' else 0
         
         print(f"LAMBDA/COMPLETE: full_recipe={final_full_recipe} ing={final_ingredients} steps={final_instructions}")
-        print(f"LAMBDA/OUT: tier_used={recipe_data.get('metadata', {}).get('tier_used', 'deterministic')} score={quality_score:.2f}")
+        print(f"LAMBDA/OUT: tier_used={tier_used} url={url[:100]} html_len={len(html) if html else 0} steps={final_instructions} ing={final_ingredients} ai_ran={ai_ran} score={quality_score:.2f}")
         
         # Set quality score before finalize
         recipe_data["quality_score"] = quality_score
@@ -4321,9 +4649,12 @@ def extract_recipe_data(soup, url, html_source='main'):
                                     )
                                     print(f"LAMBDA/JSONLD: instructions={len(json_ld_instructions_main)} frosting_detected={frosting_detected}")
                                     
+                                    # STEP 3: JSON-LD completeness check routes to HTML extraction, not directly to AI
+                                    # If JSON-LD is incomplete, we break and continue to HTML instruction extraction (Step 1)
+                                    # HTML extraction will be checked BEFORE AI fallback, ensuring real instructions are never overwritten
                                     if json_ld_is_incomplete(json_ld_from_main_page):
-                                        print("LAMBDA/PRINT: JSON-LD INCOMPLETE — ESCALATING TO AI")
-                                        # Break out of loop and continue to AI fallback
+                                        print("LAMBDA/PRINT: JSON-LD INCOMPLETE — CHECKING HTML INSTRUCTIONS BEFORE AI")
+                                        # Break out of loop and continue to HTML extraction (Step 1), then AI only if HTML fails
                                         break
                                     else:
                                         print("LAMBDA/PRINT: JSON-LD COMPLETE — RETURNING")
@@ -4351,12 +4682,106 @@ def extract_recipe_data(soup, url, html_source='main'):
             # Continue to AI fallback
             pass
     
-    # STEP 2b: AI FALLBACK FOR PRINT PAGES (only if JSON-LD failed or incomplete)
-    # If we reach here and html_source == 'print', JSON-LD was not found or was incomplete
+    # STEP 1: EXTRACT HTML INSTRUCTIONS FIRST (BEFORE AI) - CRITICAL ORDERING FIX
+    # For print pages, extract HTML instructions from main page BEFORE considering AI fallback
+    # This ensures real instructions are never overwritten by AI generation
+    if html_source == 'print' and main_page_soup:
+        # Extract HTML instructions from main page (not print page)
+        html_instructions = extract_instructions(main_page_soup, existing_instructions=None)
+        
+        # DEBUG: Log instruction count after HTML extraction
+        import sys
+        if hasattr(sys, '_getframe'):
+            # Only log in debug mode (can be controlled via env var)
+            debug_mode = os.environ.get('DEBUG_MODE', '0') == '1'
+            if debug_mode:
+                print(f"LAMBDA/DEBUG: HTML instructions extracted (print page) | count={len(html_instructions)}")
+        
+        # If meaningful HTML instructions exist, use them and skip AI entirely
+        if has_meaningful_instructions(html_instructions):
+            print("LAMBDA/PRINT: AI SKIPPED — HTML INSTRUCTIONS PRESENT (PRINT PAGE)")
+            # Build result from HTML instructions
+            # Extract other fields from main page
+            html_title = extract_title(main_page_soup)
+            html_ingredients = extract_ingredients(main_page_soup)
+            html_servings = extract_servings(main_page_soup)
+            html_prep_time = extract_prep_time(main_page_soup)
+            html_image = extract_image(main_page_soup, main_url if main_url else url)
+            
+            html_result = {
+                'title': html_title or extract_title(soup) if soup else 'Untitled Recipe',
+                'ingredients': html_ingredients,
+                'instructions': html_instructions,
+                'servings': html_servings,
+                'prep_time': html_prep_time,
+                'image': html_image,
+                'source_url': main_url if main_url else url,
+                'site_link': main_url if main_url else url
+            }
+            
+            # Mark source for tracking
+            if 'metadata' not in html_result:
+                html_result['metadata'] = {}
+            html_result['metadata']['tier_used'] = 'html'
+            html_result['metadata']['source'] = 'html_print_fallback'
+            
+            if debug_mode:
+                print(f"LAMBDA/DEBUG: Returning HTML instructions | count={len(html_instructions)} source=html")
+            
+            return html_result
+    
+    # STEP 2b: AI FALLBACK FOR PRINT PAGES (only if JSON-LD failed AND HTML extraction failed)
+    # If we reach here and html_source == 'print', JSON-LD was not found/incomplete AND HTML extraction failed
     # Use AI fallback on MAIN PAGE content (not print HTML)
     if html_source == 'print':
+        # STEP 2a: HARD AI GATE - Check if HTML instructions were extracted but not used
+        # This is a defensive check in case HTML extraction happened but wasn't meaningful
+        html_instructions_check = []
+        if main_page_soup:
+            html_instructions_check = extract_instructions(main_page_soup, existing_instructions=None)
+        
+        if has_meaningful_instructions(html_instructions_check):
+            # HTML instructions exist - skip AI
+            debug_mode = os.environ.get('DEBUG_MODE', '0') == '1'
+            if debug_mode:
+                print(f"LAMBDA/DEBUG: AI SKIPPED — HTML INSTRUCTIONS PRESENT (PRINT PAGE) | count={len(html_instructions_check)}")
+            print("LAMBDA/PRINT: AI SKIPPED — HTML INSTRUCTIONS PRESENT (PRINT PAGE)")
+            # Build result from HTML instructions (same as Step 1)
+            html_title = extract_title(main_page_soup) if main_page_soup else extract_title(soup) if soup else 'Untitled Recipe'
+            html_ingredients = extract_ingredients(main_page_soup) if main_page_soup else []
+            html_servings = extract_servings(main_page_soup) if main_page_soup else None
+            html_prep_time = extract_prep_time(main_page_soup) if main_page_soup else None
+            html_image = extract_image(main_page_soup, main_url if main_url else url) if main_page_soup else extract_image(soup, url) if soup else None
+            
+            html_result = {
+                'title': html_title,
+                'ingredients': html_ingredients,
+                'instructions': html_instructions_check,
+                'servings': html_servings,
+                'prep_time': html_prep_time,
+                'image': html_image,
+                'source_url': main_url if main_url else url,
+                'site_link': main_url if main_url else url
+            }
+            
+            if 'metadata' not in html_result:
+                html_result['metadata'] = {}
+            html_result['metadata']['tier_used'] = 'html'
+            html_result['metadata']['source'] = 'html_print_fallback'
+            
+            return html_result
+        
+        # Only proceed to AI if HTML instructions are truly missing
         print("LAMBDA/PRINT: JSON-LD NOT FOUND OR INCOMPLETE — FALLING BACK TO AI")
         print("LAMBDA/PRINT: AI FALLBACK ENABLED — JSON-LD UNAVAILABLE OR INCOMPLETE")
+        
+        # HARD AI BLOCK (FINAL SAFETY) - Check one more time before AI call
+        # AI is allowed ONLY when instructions == 0 everywhere
+        if has_meaningful_instructions(html_instructions_check):
+            print("LAMBDA/AI_BLOCK: AI BLOCKED — REAL INSTRUCTIONS EXIST (print page hard block)")
+            print(f"LAMBDA/AI_BLOCK: Instruction count={len(html_instructions_check)}")
+            # Return the HTML result we already built above
+            return html_result
         
         # Use main page HTML if available, otherwise convert soup to HTML string
         # Fix: html variable not in scope, use str(soup) as fallback
@@ -4798,6 +5223,32 @@ def extract_ingredients(soup):
                         seen_ingredients.add(text)
     
     return ingredients[:20]  # Limit to 20 ingredients
+
+def has_meaningful_instructions(instructions):
+    """
+    Validate that instructions list contains real, usable instructions.
+    Used to gate AI fallback - AI should only run if this returns False.
+    
+    Returns True if instructions are meaningful (non-empty, non-placeholder, sufficient count).
+    Returns False if instructions are missing, empty, or contain only placeholders.
+    """
+    if not instructions or not isinstance(instructions, list):
+        return False
+    
+    meaningful = [
+        inst.strip()
+        for inst in instructions
+        if isinstance(inst, str)
+        and inst.strip()
+        and len(inst.strip()) > 20
+        and inst.strip().lower() not in {
+            "instructions not available",
+            "instructions not found",
+            "n/a",
+            "tbd"
+        }
+    ]
+    return len(meaningful) >= 3
 
 def extract_instructions(soup, existing_instructions=None):
     """Extract cooking instructions with better filtering and deduplication"""
@@ -6982,10 +7433,19 @@ def call_ai_fallback(url, html):
   "notes": "string - tips, FAQs, substitutions, storage, tools (optional)"
 }}
 
+ABSOLUTE REQUIREMENT - VERBATIM EXTRACTION (DEFENSIVE ONLY):
+- Extract instructions VERBATIM from the provided page text.
+- DO NOT generate, summarize, infer, or rewrite instructions.
+- DO NOT create generic cooking steps or infer steps from ingredients.
+- DO NOT fill in missing steps or add common cooking knowledge.
+- If instructions are not explicitly present in the HTML, return an empty array [] for instructions.
+- Preserve exact wording, order, and structure as written on the page.
+- This is an extraction system, NOT a generative system.
+
 CRITICAL RULES:
 - Ingredients: ONLY actual cookable ingredients (e.g., "2 cups flour", "1 tsp salt"). 
   DO NOT include: Author names, prep times, yields, categories, methods, cuisine types, special tools lists, or FAQ items.
-- Instructions: Only cooking steps. No section headers, tips, or notes.
+- Instructions: Extract verbatim cooking steps from the page. No section headers, tips, or notes. No generation or summarization.
 - Notes: Include tips, FAQs, substitutions, storage instructions, and tool lists here. NOT in ingredients.
 - Metadata (Author, Prep Time, Yield, Category, Method, Cuisine) MUST NOT appear as ingredients.
 - Convert all times to minutes; if only total is known, set prep/cook=0.

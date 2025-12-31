@@ -1,9 +1,10 @@
 import json
 import requests
-from recipe_scrapers import scrape_url, scrape_html
+from recipe_scrapers import scrape_me
 import logging
 import os
 import time
+import re
 from urllib.parse import urlparse
 
 # ---- SAFE TIER LOGGING (timing + env flag) ----
@@ -41,6 +42,29 @@ logger.setLevel(logging.INFO)
 
 # Force BeautifulSoup to use html.parser (AWS Pandas layer includes lxml)
 os.environ['BS4_PARSER'] = 'html.parser'
+
+# ============================================================================
+# AI KILL SWITCH (GOLD RESTORATION)
+# ============================================================================
+DISABLE_AI = os.getenv("DISABLE_AI", "0") == "1"
+
+# ============================================================================
+# YOUTUBE + TIKTOK GUARDRAILS (CRITICAL - DO NOT MODIFY VIDEO LOGIC)
+# ============================================================================
+
+def is_youtube_url(url: str) -> bool:
+    """Check if URL is a YouTube video URL - UNTOUCHED VIDEO LOGIC"""
+    if not url:
+        return False
+    youtube_domains = ['youtube.com', 'youtu.be', 'm.youtube.com']
+    return any(domain in url.lower() for domain in youtube_domains)
+
+def is_tiktok_url(url: str) -> bool:
+    """Check if URL is a TikTok video URL - UNTOUCHED VIDEO LOGIC"""
+    if not url:
+        return False
+    tiktok_domains = ['tiktok.com', 'vm.tiktok.com', 't.tiktok.com']
+    return any(domain in url.lower() for domain in tiktok_domains)
 
 # ============================================================================
 # MINIMAL SAFETY ADDITIONS (Dec 23 baseline + essential safety)
@@ -87,8 +111,8 @@ def has_meaningful_instructions(instructions):
 
 def call_ai_fallback_simple(url, html):
     """Minimal AI fallback - only extracts verbatim, never generates."""
-    # AI kill switch
-    if os.environ.get("DISABLE_AI") == "1":
+    # AI kill switch (GOLD RESTORATION)
+    if DISABLE_AI:
         logger.info("LAMBDA/AI_DISABLED")
         return None
     
@@ -102,9 +126,14 @@ def call_ai_fallback_simple(url, html):
         
         prompt = f"""Extract recipe data from this HTML. Return ONLY a JSON object.
 
-CRITICAL: Extract instructions VERBATIM from the page text.
-DO NOT generate, summarize, infer, or rewrite instructions.
-If instructions are not explicitly present, return empty array [] for instructions.
+ABSOLUTE REQUIREMENT - VERBATIM EXTRACTION ONLY:
+Extract instructions exactly as written on the page.
+Do NOT rewrite, summarize, infer, or generate instructions.
+Do NOT create generic cooking steps.
+If instructions are not explicitly present in the HTML, return empty array [] for instructions.
+Preserve exact wording, order, and structure as written on the page.
+
+This is an extraction system, NOT a generative system.
 
 {{
   "title": "string",
@@ -199,27 +228,65 @@ def lambda_handler(event, context):
                 'body': json.dumps({'error': 'No URL provided'})
             }
         
+        # ========================================================================
+        # VIDEO PLATFORM EARLY EXIT (CRITICAL - PROTECTS VIDEO FLOWS)
+        # ========================================================================
+        if is_youtube_url(url):
+            logger.info("VIDEO ROUTE: YouTube — untouched (video URLs not supported by this version)")
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                },
+                'body': json.dumps({'error': 'YouTube URLs not supported by this parser version'})
+            }
+        
+        if is_tiktok_url(url):
+            logger.info("VIDEO ROUTE: TikTok — untouched (video URLs not supported by this version)")
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                },
+                'body': json.dumps({'error': 'TikTok URLs not supported by this parser version'})
+            }
+        
+        # ========================================================================
+        # WEB RECIPE PROCESSING (recipe-scrapers FIRST - GOLD RESTORATION)
+        # ========================================================================
         logger.info(f"LAMBDA/TIER0: recipe-scrapers start url={url}")
         
         # ========================================================================
         # STEP 1: TIER-0 RECIPE-SCRAPERS (Dec 23 baseline - runs FIRST)
         # ========================================================================
         try:
-            result = scrape_url(url)
+            result = scrape_me(url)
             
-            # Extract instructions and check if meaningful
+            # Extract instructions IMMEDIATELY - this is the critical check
             instructions = result.instructions()
             if has_meaningful_instructions(instructions):
-                # IMMEDIATE RETURN - instructions found (Dec 23 behavior)
-                logger.info("LAMBDA/TIER0: success — FAST EXIT (instructions found)")
+                # IMMEDIATE RETURN - instructions found (GOLD behavior)
+                logger.info("LAMBDA/GOLD_TIER0_SUCCESS")
                 
-                # Normalize instructions to list
+                # Normalize instructions to list (format only, no text rewriting)
                 if isinstance(instructions, str):
                     instructions_list = [s.strip() for s in instructions.split('\n') if s.strip()]
                 elif isinstance(instructions, list):
                     instructions_list = instructions
                 else:
                     instructions_list = []
+                
+                # Build response - nutrition is OPTIONAL and MUST NOT prevent return
+                try:
+                    nutrition_data = result.nutrition() or {}
+                except (AttributeError, Exception):
+                    nutrition_data = {}
                 
                 response_data = {
                     'title': result.title() or 'Untitled Recipe',
@@ -232,7 +299,7 @@ def lambda_handler(event, context):
                     'image': result.image() or '',
                     'host': result.host() or '',
                     'author': result.author() or '',
-                    'nutrition': result.nutrition() or {},
+                    'nutrition': nutrition_data,
                     'source': 'recipe-scrapers-tier0',
                     'metadata': {'tier_used': 'tier0', 'ai_ran': 0}
                 }
@@ -243,6 +310,7 @@ def lambda_handler(event, context):
                 except Exception:
                     pass
                 
+                # CRITICAL: Return IMMEDIATELY - do not continue execution
                 return {
                     'statusCode': 200,
                     'headers': {
@@ -270,10 +338,10 @@ def lambda_handler(event, context):
                 
                 # Retry recipe-scrapers after full fetch
                 try:
-                    result = scrape_url(url)
+                    result = scrape_me(url)
                     instructions = result.instructions()
                     if has_meaningful_instructions(instructions):
-                        logger.info("LAMBDA/TIER0: success after full fetch — FAST EXIT")
+                        logger.info("LAMBDA/GOLD_TIER0_SUCCESS")
                         
                         if isinstance(instructions, str):
                             instructions_list = [s.strip() for s in instructions.split('\n') if s.strip()]
@@ -281,6 +349,12 @@ def lambda_handler(event, context):
                             instructions_list = instructions
                         else:
                             instructions_list = []
+                        
+                        # Build response - nutrition is OPTIONAL and MUST NOT prevent return
+                        try:
+                            nutrition_data = result.nutrition() or {}
+                        except (AttributeError, Exception):
+                            nutrition_data = {}
                         
                         response_data = {
                             'title': result.title() or 'Untitled Recipe',
@@ -293,7 +367,7 @@ def lambda_handler(event, context):
                             'image': result.image() or '',
                             'host': result.host() or '',
                             'author': result.author() or '',
-                            'nutrition': result.nutrition() or {},
+                            'nutrition': nutrition_data,
                             'source': 'recipe-scrapers-tier0-full-fetch',
                             'metadata': {'tier_used': 'tier0', 'ai_ran': 0}
                         }
@@ -304,6 +378,7 @@ def lambda_handler(event, context):
                         except Exception:
                             pass
                         
+                        # CRITICAL: Return IMMEDIATELY - do not continue execution
                         return {
                             'statusCode': 200,
                             'headers': {
@@ -318,52 +393,85 @@ def lambda_handler(event, context):
                     logger.warning(f"LAMBDA/TIER0: retry after fetch failed: {e}")
         
         # ========================================================================
-        # STEP 3: AI FALLBACK (ONLY if instructions still empty after full fetch)
+        # STEP 3: AI FALLBACK (LAST RESORT ONLY - GOLD RESTORATION)
         # ========================================================================
-        # AI may run ONLY if instructions list is empty after full fetch
+        # AI may run ONLY if:
+        # 1. recipe-scrapers returned ZERO instructions AND
+        # 2. Instructions list is truly empty AND
+        # 3. DISABLE_AI != 1
+        
+        # GOLD BEHAVIOR: Track that no instructions were found from Tier-0
+        # (If instructions existed, we would have returned already)
+        existing_instructions = []  # No instructions found from Tier-0
+        
+        # EXPLICIT GUARD: AI must NEVER run if instructions exist
+        if has_meaningful_instructions(existing_instructions):
+            logger.info("LAMBDA/AI_BLOCKED: Instructions exist - skipping AI (GOLD behavior)")
+            # Return error response - should not reach here if Tier-0 succeeded
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                },
+                'body': json.dumps({'error': 'Recipe extraction failed - no instructions found'})
+            }
+        
+        # Only proceed if instructions are truly empty
         if not html:
             html = fetch_full_html(url)
         
-        if html:
+        # AI may ONLY run if instructions is empty AND DISABLE_AI != 1
+        if html and not has_meaningful_instructions(existing_instructions):
             logger.info("LAMBDA/AI: attempting fallback (instructions empty after Tier-0)")
-            ai_result = call_ai_fallback_simple(url, html)
             
-            if ai_result and ai_result.get('instructions'):
-                ai_instructions = ai_result.get('instructions', [])
-                if isinstance(ai_instructions, str):
-                    ai_instructions = [s.strip() for s in ai_instructions.split('\n') if s.strip()]
-                elif not isinstance(ai_instructions, list):
-                    ai_instructions = []
+            # AI kill switch check
+            if DISABLE_AI:
+                logger.info("LAMBDA/AI_DISABLED: AI is disabled by environment variable")
+            else:
+                ai_result = call_ai_fallback_simple(url, html)
                 
-                if has_meaningful_instructions(ai_instructions):
-                    logger.info("LAMBDA/AI: fallback success")
+                if ai_result and ai_result.get('instructions'):
+                    ai_instructions = ai_result.get('instructions', [])
+                    if isinstance(ai_instructions, str):
+                        ai_instructions = [s.strip() for s in ai_instructions.split('\n') if s.strip()]
+                    elif not isinstance(ai_instructions, list):
+                        ai_instructions = []
                     
-                    response_data = {
-                        'title': ai_result.get('title') or 'Untitled Recipe',
-                        'ingredients': ai_result.get('ingredients', []),
-                        'instructions': ai_instructions,
-                        'servings': ai_result.get('servings'),
-                        'image': ai_result.get('image', ''),
-                        'source': 'ai-fallback',
-                        'metadata': {'tier_used': 'ai', 'ai_ran': 1}
-                    }
-                    
-                    try:
-                        _dur = int((time.time() - start_time) * 1000)
-                        _log_tier("ai", url, missing_fields=None, quality=None, duration_ms=_dur)
-                    except Exception:
-                        pass
-                    
-                    return {
-                        'statusCode': 200,
-                        'headers': {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
-                            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                            'Access-Control-Allow-Methods': 'POST,OPTIONS'
-                        },
-                        'body': json.dumps(response_data)
-                    }
+                    # FINAL GUARD: Block AI from overwriting existing instructions (GOLD behavior)
+                    if has_meaningful_instructions(existing_instructions):
+                        logger.info("LAMBDA/AI_BLOCKED: Instructions exist - AI result discarded (GOLD behavior)")
+                    elif has_meaningful_instructions(ai_instructions):
+                        logger.info("LAMBDA/AI: fallback success (verbatim extraction)")
+                        
+                        response_data = {
+                            'title': ai_result.get('title') or 'Untitled Recipe',
+                            'ingredients': ai_result.get('ingredients', []),
+                            'instructions': ai_instructions,
+                            'servings': ai_result.get('servings'),
+                            'image': ai_result.get('image', ''),
+                            'source': 'ai-fallback',
+                            'metadata': {'tier_used': 'ai', 'ai_ran': 1}
+                        }
+                        
+                        try:
+                            _dur = int((time.time() - start_time) * 1000)
+                            _log_tier("ai", url, missing_fields=None, quality=None, duration_ms=_dur)
+                        except Exception:
+                            pass
+                        
+                        return {
+                            'statusCode': 200,
+                            'headers': {
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*',
+                                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                                'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                            },
+                            'body': json.dumps(response_data)
+                        }
         
         # All methods failed
         logger.error("LAMBDA/ERROR: All extraction methods failed")

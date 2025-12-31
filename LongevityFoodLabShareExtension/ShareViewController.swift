@@ -30,6 +30,11 @@ class ShareViewController: UIViewController {
         super.viewDidLoad()
         print("SE/INIT: viewDidLoad called (after super)")
         
+        // Override storyboard contentMode to prevent zoom/scaling issue
+        view.contentMode = .redraw
+        view.clipsToBounds = true
+        print("ShareViewController contentMode overridden to redraw")
+        
         setupUI()
         processShare()
         print("SE/INIT: viewDidLoad END")
@@ -276,6 +281,10 @@ class ShareViewController: UIViewController {
         // Set hosting controller's root view background color to match resolved scheme
         hostingController.view.backgroundColor = resolvedColorScheme == .dark ? .black : .systemBackground
         
+        // Pin hosting controller view frame to prevent zoom/scaling
+        hostingController.view.frame = view.bounds
+        hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        
         // Add as child view controller
         addChild(hostingController)
         view.addSubview(hostingController.view)
@@ -431,6 +440,10 @@ class ShareViewController: UIViewController {
         
         // Set hosting controller's root view background color to match resolved scheme
         hostingController.view.backgroundColor = resolvedColorScheme == .dark ? .black : .systemBackground
+        
+        // Pin hosting controller view frame to prevent zoom/scaling
+        hostingController.view.frame = view.bounds
+        hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
         // Add as child view controller
         addChild(hostingController)

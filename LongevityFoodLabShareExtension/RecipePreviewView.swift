@@ -174,15 +174,15 @@ struct RecipePreviewView: View {
                                                     print("IMG/Preview: RecipePreviewView sourceURL=\(loadingState.sourceUrl), isShorts=\(isShorts)")
                                                 }
                                 } else {
-                                    // AsyncImage with diagnostics - use GeometryReader to prevent zoom effect
+                                    // AsyncImage with diagnostics
                                     if let u = URL(string: fixedImageUrl) {
-                                        GeometryReader { geometry in
+                                        Group {
                                             AsyncImage(url: u) { phase in
                                                 switch phase {
                                                 case .empty:
                                                     Rectangle()
                                                         .fill(Color.gray.opacity(0.3))
-                                                        .frame(width: geometry.size.width, height: 200)
+                                                        .frame(height: 200)
                                                         .overlay(ProgressView())
                                                         .cornerRadius(12)
                                                         .onAppear {
@@ -191,18 +191,18 @@ struct RecipePreviewView: View {
                                                 case .success(let image):
                                                     image
                                                         .resizable()
-                                                        .aspectRatio(contentMode: .fill)  // Fill entire frame
-                                                        .frame(width: geometry.size.width, height: 200)  // Use exact width from GeometryReader
-                                                        .clipped()  // Crop to fill rectangle (no letterboxing)
+                                                                .aspectRatio(contentMode: .fill)  // Fill entire frame
+                                                                .frame(maxWidth: .infinity)  // Fill available width
+                                                                .frame(height: 200)
+                                                                .clipped()  // Crop to fill rectangle (no letterboxing)
                                                         .cornerRadius(12)
                                                         .onAppear {
-                                                            print("SE/IMG: AsyncImage success \(fixedImageUrl) isShorts=\(isShorts) width=\(geometry.size.width)")
+                                                                    print("SE/IMG: AsyncImage success \(fixedImageUrl) isShorts=\(isShorts)")
                                                         }
                                                 case .failure(let error):
                                                     Rectangle()
                                                         .fill(Color.gray.opacity(0.3))
-                                                        .frame(width: geometry.size.width, height: 200)
-                                                        .cornerRadius(12)
+                                                        .frame(height: 200)
                                                         .overlay(
                                                             VStack(spacing: 6) {
                                                                 Image(systemName: "photo")
@@ -225,8 +225,6 @@ struct RecipePreviewView: View {
                                                 }
                                             }
                                         }
-                                        .frame(height: 200)
-                                        .clipped()
                                     } else {
                                         Rectangle()
                                             .fill(Color.gray.opacity(0.3))

@@ -30,6 +30,11 @@ class ShareViewController: UIViewController {
         super.viewDidLoad()
         print("SE/INIT: viewDidLoad called (after super)")
         
+        // Override storyboard contentMode to prevent zoom/scaling issue
+        view.contentMode = .redraw
+        view.clipsToBounds = true
+        print("ShareViewController contentMode overridden to redraw")
+        
         setupUI()
         processShare()
         print("SE/INIT: viewDidLoad END")

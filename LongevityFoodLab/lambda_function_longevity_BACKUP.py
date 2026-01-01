@@ -3275,10 +3275,11 @@ def extract_recipe_data(soup, url):
     is_barefootcontessa = 'barefootcontessa.com' in domain
     is_foodandwine = 'foodandwine.com' in domain
     is_loveandlemons = 'loveandlemons.com' in domain
+    is_allrecipes = 'allrecipes.com' in domain
     
-    # Try JSON-LD first (but skip for Food Network, Barefoot Contessa, Food & Wine, and Love and Lemons - use site-specific parser instead)
+    # Try JSON-LD first (but skip for Food Network, Barefoot Contessa, Food & Wine, Love and Lemons, and AllRecipes - use site-specific parser instead)
     json_ld_instructions_for_dedup = []  # Store JSON-LD instructions for deduplication if we fall back
-    if not is_foodnetwork and not is_barefootcontessa and not is_foodandwine and not is_loveandlemons:
+    if not is_foodnetwork and not is_barefootcontessa and not is_foodandwine and not is_loveandlemons and not is_allrecipes:
         try:
             for script in soup.find_all('script', type='application/ld+json'):
                 try:
@@ -3636,6 +3637,66 @@ def extract_recipe_data(soup, url):
                 print(f"LAMBDA/PARSE: Love and Lemons parser found only {ing_count} ingredients (< 2 required), falling back to generic")
             else:
                 print("LAMBDA/PARSE: Love and Lemons parser returned None, falling back to generic extraction")
+            title = extract_title(soup)
+            ingredients = extract_ingredients(soup)
+            instructions = extract_instructions(soup, existing_instructions=json_ld_instructions_for_dedup if json_ld_instructions_for_dedup else None)
+            # Extract servings, prep time, image for fallback case
+            servings = extract_servings(soup)
+            prep_time = extract_prep_time(soup)
+            image = extract_image(soup, url)
+            source_url = url
+    # Check if this is AllRecipes - use site-specific parser
+    elif is_allrecipes:
+        print(f"LAMBDA/PARSE: detected AllRecipes domain={domain}, using site-specific parser")
+        allrecipes_result = extract_allrecipes(soup, url)
+        
+        # If parser returned None due to placeholder HTML, fetch HTML server-side
+        if allrecipes_result is None:
+            html_text = str(soup) if soup else ''
+            html_length = len(html_text)
+            if html_length < 1000:  # Placeholder detected
+                print(f"LAMBDA/AR: Placeholder HTML detected ({html_length} bytes), fetching HTML server-side")
+                try:
+                    import requests
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200 and len(response.text) > 1000:
+                        print(f"LAMBDA/AR: Successfully fetched HTML server-side ({len(response.text)} bytes)")
+                        fetched_soup = BeautifulSoup(response.text, 'html.parser')
+                        # Try parser again with fetched HTML
+                        allrecipes_result = extract_allrecipes(fetched_soup, url)
+                    else:
+                        print(f"LAMBDA/AR: Server-side fetch failed (status={response.status_code}, length={len(response.text) if response.status_code == 200 else 0})")
+                except Exception as e:
+                    print(f"LAMBDA/AR: Server-side fetch error: {str(e)}")
+        
+        if allrecipes_result and len(allrecipes_result.get('ingredients', [])) >= 2:
+            # AllRecipes parser found data, use it
+            ing_count = len(allrecipes_result.get('ingredients', []))
+            inst_count = len(allrecipes_result.get('instructions', []))
+            print(f"LAMBDA/PARSE: AllRecipes parser SUCCESS - found {ing_count} ingredients, {inst_count} instructions")
+            # Merge with generic extraction for missing fields
+            title = allrecipes_result.get('title') or extract_title(soup)
+            ingredients = allrecipes_result.get('ingredients', [])
+            instructions = allrecipes_result.get('instructions', [])
+            # Use AllRecipes extracted servings/prep_time/cook_time if available
+            servings = allrecipes_result.get('servings') or extract_servings(soup)
+            prep_time = allrecipes_result.get('prep_time') or extract_prep_time(soup)
+            cook_time = allrecipes_result.get('cook_time')
+            total_time = allrecipes_result.get('total_time')
+            # Use AllRecipes extracted image if available
+            image = allrecipes_result.get('image') or extract_image(soup, url)
+            # Get source_url from AllRecipes result
+            source_url = allrecipes_result.get('source_url') or url
+        else:
+            # AllRecipes parser didn't find data, fall back to generic
+            if allrecipes_result:
+                ing_count = len(allrecipes_result.get('ingredients', []))
+                print(f"LAMBDA/PARSE: AllRecipes parser found only {ing_count} ingredients (< 2 required), falling back to generic")
+            else:
+                print("LAMBDA/PARSE: AllRecipes parser returned None after server-side fetch attempt, falling back to generic extraction")
             title = extract_title(soup)
             ingredients = extract_ingredients(soup)
             instructions = extract_instructions(soup, existing_instructions=json_ld_instructions_for_dedup if json_ld_instructions_for_dedup else None)
@@ -4980,6 +5041,238 @@ def extract_loveandlemons(soup, url=''):
     # If generic extraction also failed, return None
     print(f"LAMBDA/LL: Generic extraction also failed (found {len(cleaned_generic_ingredients)} ingredients), returning None")
     return None
+
+def extract_allrecipes(soup, url=''):
+    """AllRecipes.com specific extraction - filters navigation items from ingredients and site elements"""
+    result = {}
+    
+    if url:
+        result['source_url'] = url
+    
+    # Early detection: Check if HTML is placeholder SVG (iOS sends 327 bytes of SVG when HTML extraction fails)
+    html_text = str(soup) if soup else ''
+    html_length = len(html_text)
+    
+    # If HTML is too small (< 1000 bytes) or is mostly SVG, it's likely placeholder
+    if html_length < 1000:
+        print(f"LAMBDA/AR: HTML too small ({html_length} bytes) - likely placeholder SVG, skipping parser")
+        return None
+    
+    # Check if HTML is mostly SVG (common placeholder pattern)
+    if html_length < 5000 and 'svg xmlns' in html_text.lower() and html_text.lower().count('<svg') > 0:
+        # Count non-SVG content
+        non_svg_content = html_text.replace('<svg', '').replace('</svg>', '').replace('xmlns', '')
+        if len(non_svg_content.strip()) < 500:
+            print(f"LAMBDA/AR: HTML appears to be placeholder SVG ({html_length} bytes), skipping parser")
+            return None
+    
+    # Title - use AllRecipes-specific selector
+    title_elem = soup.select_one('h1.heading-content, h1[data-testid="recipe-title"], h1.article-heading')
+    if title_elem:
+        result['title'] = title_elem.get_text(strip=True)
+        print(f"LAMBDA/AR: found title={result['title'][:50]}")
+    else:
+        print("LAMBDA/AR: no title found with AllRecipes selectors")
+    
+    # Ingredients - use AllRecipes-specific structured ingredients selector
+    ingredients = []
+    ingredient_selectors = [
+        # AllRecipes structured ingredients (primary)
+        '[class*="structured-ingredients__list-item"]',
+        'span[data-ingredient-name]',
+        'span[data-ingredient-quantity]',
+        # AllRecipes user recipes
+        'span.ingredients-item-name',
+        # Generic fallbacks (will filter heavily)
+        '[class*="ingredient"] li',
+        '[class*="ingredient"] span',
+        '.ingredients li',
+        '.ingredients-list li'
+    ]
+    
+    # AllRecipes-specific navigation/category words that should be filtered from ingredients
+    skip_words = [
+        # Account/navigation
+        'log out', 'log in', 'my account', 'account settings', 'help',
+        'add a recipe', 'saved recipes', 'collections', 'account',
+        # Search/forms
+        'search', 'please fill out this field', 'fill out this field',
+        # Site navigation categories
+        'one-pot meals', 'quick & easy', '30-minute meals', 'view all',
+        'salads', 'drinks', 'desserts', 'fruits', 'vegetables',
+        'soups, stews & chili', 'comfort food', 'newsletters', 'sweepstakes',
+        # Generic navigation
+        'recipes', 'categories', 'tags', 'navigation', 'menu', 'about',
+        'contact us', 'email sign-up', 'facebook', 'youtube', 'pinterest',
+        'privacy policy', 'terms', 'conditions', 'copyright', 'rights reserved'
+    ]
+    
+    seen_ingredients = set()
+    
+    # Try AllRecipes structured ingredients first (most reliable)
+    for selector in ingredient_selectors:
+        elements = soup.select(selector)
+        if elements:
+            print(f"LAMBDA/AR: selector '{selector}' found {len(elements)} elements")
+            for elem in elements:
+                # For structured ingredients, combine quantity + unit + name
+                if 'structured-ingredients__list-item' in str(elem.get('class', [])):
+                    # Extract structured ingredient parts
+                    quantity_elem = elem.find('span', {'data-ingredient-quantity': True})
+                    unit_elem = elem.find('span', {'data-ingredient-unit': True})
+                    name_elem = elem.find('span', {'data-ingredient-name': True})
+                    
+                    parts = []
+                    if quantity_elem:
+                        parts.append(quantity_elem.get_text(strip=True))
+                    if unit_elem:
+                        parts.append(unit_elem.get_text(strip=True))
+                    if name_elem:
+                        parts.append(name_elem.get_text(strip=True))
+                    
+                    if parts:
+                        text = ' '.join(parts).strip()
+                    else:
+                        text = elem.get_text(strip=True)
+                else:
+                    text = elem.get_text(strip=True)
+                
+                if text and 3 < len(text) < 200:
+                    text_lower = text.lower()
+                    
+                    # Filter out navigation/category text
+                    if any(skip in text_lower for skip in skip_words):
+                        continue
+                    
+                    # Filter out instruction-like text
+                    instruction_starters = [
+                        'preheat', 'heat', 'add', 'mix', 'stir', 'cook', 'bake',
+                        'discard', 'transfer', 'return', 'spread', 'tie', 'bring',
+                        'cover', 'separate', 'pull', 'spoon', 'sprinkle', 'cool',
+                        'dry', 'place', 'turn', 'sauté', 'allow', 'check', 'using'
+                    ]
+                    if any(text_lower.startswith(starter) for starter in instruction_starters):
+                        continue
+                    
+                    # Must look like an ingredient (has measurement or food word)
+                    if any(indicator in text_lower for indicator in [
+                        'cup', 'cups', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons',
+                        'tbsp', 'tsp', 'pound', 'pounds', 'ounce', 'ounces', 'lb', 'oz',
+                        'gram', 'grams', 'ml', 'flour', 'sugar', 'salt', 'pepper', 'oil',
+                        'butter', 'milk', 'egg', 'eggs', 'cheese', 'chicken', 'beef', 'fish',
+                        'vegetable', 'herb', 'spice', 'cloves', 'clove', 'whole', 'diced',
+                        'chopped', 'minced', 'sprigs', 'fresh', 'kosher', 'ground', 'black',
+                        'scrubbed', 'ribs', 'bulb', 'threads', 'stock', 'water', 'degrees',
+                        'sticks', 'vanilla', 'extract', 'jam', 'peanuts', 'bars', 'room',
+                        'temperature', 'pan', 'attachment', 'bowl', 'baking', 'garlic', 'onion'
+                    ]):
+                        # Remove leading numbers/step markers
+                        text = re.sub(r'^(Step \d+:\s*|\d+\.\s*)', '', text)
+                        if text and text.lower() not in seen_ingredients:
+                            ingredients.append(text)
+                            seen_ingredients.add(text.lower())
+            
+            if ingredients:
+                print(f"LAMBDA/AR: successfully extracted {len(ingredients)} ingredients using selector '{selector}'")
+                break
+    
+    if not ingredients:
+        print("LAMBDA/AR: WARNING - no ingredients found with any selector")
+    
+    result['ingredients'] = ingredients
+    
+    # Instructions - use AllRecipes-specific selectors
+    instructions = []
+    instruction_selectors = [
+        # AllRecipes-specific selectors (priority)
+        '[data-testid="instruction-step"]',
+        '[data-testid="instruction-step"] p',
+        '.mntl-sc-block-group--OL li',
+        '.mntl-sc-block-group--OL p',
+        '[class*="mntl-sc-block"] li[class*="instruction"]',
+        '[class*="mntl-sc-block"] p[class*="instruction"]',
+        # AllRecipes user recipes
+        'div.paragraph',
+        # Generic fallbacks
+        '[class*="instruction"] li',
+        '[class*="instruction"] p',
+        '.instructions li',
+        '.instructions p',
+        '[itemprop="recipeInstructions"] li',
+        '[itemprop="recipeInstructions"] p'
+    ]
+    
+    # Skip words for instructions
+    skip_words_instructions = [
+        'ingredients', 'ingredient', 'nutrition', 'calories', 'fat', 'protein',
+        'carbs', 'fiber', 'sugar', 'sodium', 'cholesterol', 'serves', 'yield',
+        'prep time', 'cook time', 'total time', 'difficulty', 'skill level',
+        'log out', 'log in', 'my account', 'search', 'please fill out this field',
+        'copyright', 'all rights reserved', 'allrecipes', 'recipe by', 'author'
+    ]
+    
+    seen_instructions = set()
+    
+    for selector in instruction_selectors:
+        elements = soup.select(selector)
+        if elements:
+            print(f"LAMBDA/AR: instruction selector '{selector}' found {len(elements)} elements")
+            for elem in elements:
+                text = elem.get_text(strip=True)
+                if text and len(text) > 10:
+                    text_lower = text.lower()
+                    
+                    # Filter out non-instruction content
+                    if any(skip in text_lower for skip in skip_words_instructions):
+                        continue
+                    
+                    # Normalize for duplicate checking
+                    normalized_text = text.strip().lower()
+                    normalized_text = re.sub(r'^\d+[\.\)]\s*', '', normalized_text)
+                    normalized_text = re.sub(r'\s+', ' ', normalized_text).strip()
+                    
+                    # Check if this looks like an instruction (starts with action words)
+                    if any(action in text_lower for action in [
+                        'heat', 'add', 'mix', 'stir', 'cook', 'bake', 'fry', 'boil',
+                        'simmer', 'preheat', 'place', 'put', 'combine', 'blend',
+                        'whisk', 'beat', 'fold', 'pour', 'drain', 'remove', 'serve'
+                    ]):
+                        if normalized_text not in seen_instructions and len(normalized_text) > 10:
+                            instructions.append(text)
+                            seen_instructions.add(normalized_text)
+                    elif text[0].isdigit() or text.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
+                        if normalized_text not in seen_instructions and len(normalized_text) > 10:
+                            instructions.append(text)
+                            seen_instructions.add(normalized_text)
+                    elif len(text.split()) > 5:  # Longer text is likely an instruction
+                        if normalized_text not in seen_instructions and len(normalized_text) > 10:
+                            instructions.append(text)
+                            seen_instructions.add(normalized_text)
+            
+            if instructions:
+                print(f"LAMBDA/AR: successfully extracted {len(instructions)} instructions using selector '{selector}'")
+                break
+    
+    result['instructions'] = instructions
+    
+    # Extract servings, prep time, cook time if not already found
+    if not result.get('servings'):
+        servings = extract_servings(soup)
+        if servings:
+            result['servings'] = servings
+    
+    if not result.get('prep_time'):
+        prep_time = extract_prep_time(soup)
+        if prep_time:
+            result['prep_time'] = prep_time
+    
+    # Extract image if not already found
+    if not result.get('image'):
+        image = extract_image(soup, url)
+        if image:
+            result['image'] = image
+    
+    return result
 
 def extract_servings(soup):
     """Extract number of servings with comprehensive search - collects all matches and returns best one based on scoring."""

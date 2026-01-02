@@ -590,6 +590,14 @@ class RecipeBrowserService: NSObject, ObservableObject {
             // Jump To Recipe points to an anchor - extract that section
             if let sectionHTML = extractSectionByAnchor(anchorId: anchorId, from: html) {
                 print("✅ SE/RecipeBrowserService: Using Jump To Recipe section HTML (length: \(sectionHTML.count))")
+                
+                // Validate extracted HTML size before sending
+                if sectionHTML.count < 1000 || (sectionHTML.count < 2000 && (sectionHTML.contains("icon") || sectionHTML.contains("button") || sectionHTML.contains("<svg"))) {
+                    print("⚠️ SE/RecipeBrowserService: Extracted section HTML too small (\(sectionHTML.count) bytes) or invalid, falling back to main HTML")
+                    self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: html, htmlSource: "main", fullHTMLForImageExtraction: fullHTML, completion: completion)
+                    return
+                }
+                
                 // Send section HTML to Lambda, but use full HTML for image extraction (has meta tags)
                 self.sendToLambdaWithHTML(url: originalURL.absoluteString, html: sectionHTML, htmlSource: "jump-to-recipe-section", fullHTMLForImageExtraction: fullHTML, completion: completion)
             } else {

@@ -1368,6 +1368,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let contentRange = Range(match.range(at: 1), in: html)!
             var imageUrl = String(html[contentRange])
+            // Unescape JSON-escaped forward slashes
+            imageUrl = imageUrl.replacingOccurrences(of: "\\/", with: "/")
             // Resolve relative URLs
             if imageUrl.hasPrefix("//") {
                 imageUrl = "https:" + imageUrl
@@ -1389,6 +1391,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let contentRange = Range(match.range(at: 1), in: html)!
             var imageUrl = String(html[contentRange])
+            // Unescape JSON-escaped forward slashes
+            imageUrl = imageUrl.replacingOccurrences(of: "\\/", with: "/")
             if imageUrl.hasPrefix("//") {
                 imageUrl = "https:" + imageUrl
             } else if !imageUrl.hasPrefix("http") {
@@ -1409,6 +1413,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let urlRange = Range(match.range(at: 1), in: html)!
             var imageUrl = String(html[urlRange])
+            // Unescape JSON-escaped forward slashes
+            imageUrl = imageUrl.replacingOccurrences(of: "\\/", with: "/")
             if imageUrl.hasPrefix("//") {
                 imageUrl = "https:" + imageUrl
             } else if !imageUrl.hasPrefix("http") {
@@ -1429,6 +1435,8 @@ class RecipeBrowserService: NSObject, ObservableObject {
            match.numberOfRanges > 1 {
             let contentRange = Range(match.range(at: 1), in: html)!
             var imageUrl = String(html[contentRange])
+            // Unescape JSON-escaped forward slashes
+            imageUrl = imageUrl.replacingOccurrences(of: "\\/", with: "/")
             if imageUrl.hasPrefix("//") {
                 imageUrl = "https:" + imageUrl
             } else if !imageUrl.hasPrefix("http") {

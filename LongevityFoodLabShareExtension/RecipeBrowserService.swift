@@ -276,6 +276,11 @@ class RecipeBrowserService: NSObject, ObservableObject {
             return true
         }
         
+        // Accept WordPress Recipe Maker print URLs
+        if path.contains("/wprm_print/") {
+            return true
+        }
+        
         // Accept URLs that end with /print or /print-recipe
         if path.hasSuffix("/print") || path.hasSuffix("/print-recipe") {
             return true

@@ -31,10 +31,9 @@ struct FallbackRecipePreviewView: View {
                 AsyncImage(url: URL(string: imageURL)) { image in
                     image
                         .resizable()
-                        .aspectRatio(contentMode: .fill)  // Fill entire frame
+                        .aspectRatio(contentMode: .fit)  // Fit entire image (no cropping)
                         .frame(maxWidth: .infinity)  // Fill available width
                         .frame(height: 200)
-                        .clipped()  // Crop to fill rectangle (no letterboxing)
                         .cornerRadius(8)
                 } placeholder: {
                     Rectangle()

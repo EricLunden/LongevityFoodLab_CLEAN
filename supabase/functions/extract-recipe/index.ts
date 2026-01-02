@@ -4,7 +4,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const LAMBDA_URL = Deno.env.get('LAMBDA_URL') || 'https://75gu2r32syfuqogbcn7nugmfm40oywqn.lambda-url.us-east-2.on.aws/'
+const LAMBDA_URL = Deno.env.get('LAMBDA_URL') || 'https://e573obhi3ggyorltf7pjctkbiu0ecxve.lambda-url.us-east-2.on.aws/'
 
 serve(async (req) => {
   // Handle CORS
@@ -186,6 +186,9 @@ serve(async (req) => {
         }
       }
     )
+    } finally {
+      clearTimeout(timeoutId)
+    }
 
   } catch (error) {
     console.error('Error:', error)

@@ -2501,6 +2501,24 @@ def lambda_handler(event, context):
         url = body.get('url', '')
         html = body.get('html', '')
         
+        # === HTML REFETCH GUARD ===
+        if url and (not html or not html.strip()):
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                  "Chrome/120.0.0.0 Safari/537.36"
+                }
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.ok:
+                    html = resp.text
+                    print("LAMBDA/FETCH: html empty, refetched from url")
+                else:
+                    print(f"LAMBDA/FETCH: failed status={resp.status_code}")
+            except Exception as e:
+                print(f"LAMBDA/FETCH: exception during refetch: {e}")
+        # === END HTML REFETCH GUARD ===
+        
         # Log request type
         if html:
             print(f"LAMBDA/REQ: url+html")
@@ -2673,6 +2691,73 @@ def lambda_handler(event, context):
                         'Access-Control-Allow-Methods': 'POST,OPTIONS'
                     },
                     'body': json.dumps({'error': f'TikTok extraction failed: {str(e)}', 'quality_score': 0.0, 'reason': 'tiktok_extraction_failed'})
+                }
+        
+        # ---- Sally's Baking Addiction domain-locked routing ----
+        if "sallysbakingaddiction.com" in url:
+            # Ensure HTML is available
+            if not html:
+                try:
+                    response = requests.get(
+                        url,
+                        timeout=10,
+                        headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+                    )
+                    html = response.text
+                    print(f"LAMBDA/SALLY: HTML fetched ok bytes={len(html)}")
+                except Exception as e:
+                    print(f"LAMBDA/SALLY: HTML fetch error={str(e)}")
+                    return {
+                        'statusCode': 200,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                            'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                        },
+                        'body': json.dumps({'error': 'Sally extraction failed - HTML fetch error', 'quality_score': 0.0, 'reason': 'sally_html_fetch_failed'})
+                    }
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            result = extract_sallysbakingaddiction(soup, url)
+            if result and len(result.get('ingredients', [])) >= 2:
+                # Build complete recipe_data from Sally parser results
+                recipe_data = {
+                    'title': result.get('title') or extract_title(soup),
+                    'ingredients': result.get('ingredients', []),
+                    'instructions': result.get('instructions', []),
+                    'servings': result.get('servings') or extract_servings(soup),
+                    'prep_time': result.get('prep_time') or extract_prep_time(soup),
+                    'image': result.get('image') or extract_image(soup, url),
+                    'source_url': result.get('source_url') or url,
+                    'site_link': url,
+                    'site_name': 'sallysbakingaddiction.com'
+                }
+                recipe_data['quality_score'] = calculate_quality_score(recipe_data)
+                if 'metadata' not in recipe_data:
+                    recipe_data['metadata'] = {}
+                recipe_data['metadata']['tier_used'] = 'sally_deterministic'
+                recipe_data['metadata']['full_recipe'] = len(recipe_data.get('ingredients', [])) >= 3 and len(recipe_data.get('instructions', [])) >= 3
+                
+                print(f"LAMBDA/SALLY: Extraction successful - {len(recipe_data.get('ingredients', []))} ingredients, {len(recipe_data.get('instructions', []))} instructions")
+                try:
+                    _dur = int((time.time() - start_time) * 1000)
+                    _log_tier("sally", url, missing_fields=None, quality=recipe_data.get('quality_score'), duration_ms=_dur)
+                except Exception:
+                    pass
+                
+                return finalize_response(recipe_data, url)
+            else:
+                print(f"LAMBDA/SALLY: Extraction failed - ingredients={len(result.get('ingredients', [])) if result else 0}")
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                        'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                    },
+                    'body': json.dumps({'error': 'Sally extraction failed', 'quality_score': 0.0, 'reason': 'sally_extraction_failed'})
                 }
         
         # ---- early Spoonacular try when no HTML ----
@@ -5273,6 +5358,141 @@ def extract_allrecipes(soup, url=''):
             result['image'] = image
     
     return result
+
+def extract_sallysbakingaddiction(soup, url=''):
+    """Sally's Baking Addiction specific extraction - targets WPRM (WordPress Recipe Maker) elements with multiple selector variants and JSON-LD fallback"""
+    result = {}
+    
+    if url:
+        result['source_url'] = url
+    
+    # Navigation blacklist - if >30% of ingredients match, discard result
+    NAVIGATION_BLACKLIST = {
+        "all recipes",
+        "baking tips",
+        "ingredient",
+        "community",
+        "sally's shop",
+        "videos",
+        "browse by ingredient",
+        "challenge"
+    }
+    
+    # WPRM selector variants in order of preference
+    wprm_selector_sets = [
+        # PRIMARY: Direct WPRM classes
+        {
+            'ingredients': '.wprm-recipe-ingredient',
+            'instructions': '.wprm-recipe-instruction'
+        },
+        # SECONDARY: List-based WPRM
+        {
+            'ingredients': '.wprm-recipe-ingredients li',
+            'instructions': '.wprm-recipe-instructions li'
+        },
+        # TERTIARY: Wrapper-based (extract from container, try to distinguish ingredients/instructions)
+        {
+            'ingredients': '.wprm-recipe-container .wprm-recipe-ingredient, .wprm-recipe-container .wprm-recipe-ingredients li',
+            'instructions': '.wprm-recipe-container .wprm-recipe-instruction, .wprm-recipe-container .wprm-recipe-instructions li'
+        },
+        {
+            'ingredients': '.wprm-recipe .wprm-recipe-ingredient, .wprm-recipe .wprm-recipe-ingredients li',
+            'instructions': '.wprm-recipe .wprm-recipe-instruction, .wprm-recipe .wprm-recipe-instructions li'
+        },
+        {
+            'ingredients': '[data-recipe-id] .wprm-recipe-ingredient, [data-recipe-id] .wprm-recipe-ingredients li',
+            'instructions': '[data-recipe-id] .wprm-recipe-instruction, [data-recipe-id] .wprm-recipe-instructions li'
+        }
+    ]
+    
+    # Try each selector set in order
+    for selector_set in wprm_selector_sets:
+        ingredients = []
+        instructions = []
+        
+        # Extract ingredients
+        ingredient_elements = soup.select(selector_set['ingredients'])
+        for elem in ingredient_elements:
+            text = elem.get_text(strip=True)
+            if text and len(text) > 3 and len(text) < 500:
+                ingredients.append(text)
+        
+        # Extract instructions
+        instruction_elements = soup.select(selector_set['instructions'])
+        for elem in instruction_elements:
+            text = elem.get_text(strip=True)
+            if text and len(text) > 10 and len(text) < 2000:
+                instructions.append(text)
+        
+        # Validate ingredients against blacklist
+        if ingredients:
+            blacklist_matches = sum(1 for ing in ingredients if any(bl in ing.lower() for bl in NAVIGATION_BLACKLIST))
+            blacklist_ratio = blacklist_matches / len(ingredients)
+            
+            if blacklist_ratio > 0.30:
+                # Too many navigation items, try next selector
+                print("LAMBDA/PARSE: Sally fallback to alternate WPRM selector")
+                continue
+        
+        # Check if we have valid results
+        if len(ingredients) >= 2 and len(instructions) >= 1:
+            result['ingredients'] = ingredients
+            result['instructions'] = instructions
+            break
+    
+    # If WPRM extraction succeeded, return result
+    if result.get('ingredients') and len(result.get('ingredients', [])) >= 2:
+        # Extract title if not already set
+        if not result.get('title'):
+            title_elem = soup.select_one('.wprm-recipe-name, h1.wprm-recipe-title, h1.entry-title, h1')
+            if title_elem:
+                result['title'] = title_elem.get_text(strip=True)
+        return result
+    
+    # ALL WPRM SELECTORS FAILED - Try JSON-LD fallback (Sally domain-locked)
+    print("LAMBDA/PARSE: Sally JSON-LD fallback used")
+    try:
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, list):
+                    data = data[0] if data else {}
+                if data.get('@type') == 'Recipe':
+                    # Extract ingredients
+                    json_ld_ingredients = []
+                    recipe_ingredient = data.get('recipeIngredient', [])
+                    if isinstance(recipe_ingredient, list):
+                        for ing in recipe_ingredient:
+                            if isinstance(ing, str) and ing.strip():
+                                json_ld_ingredients.append(ing.strip())
+                    
+                    # Extract instructions
+                    json_ld_instructions = []
+                    recipe_instructions = data.get('recipeInstructions', [])
+                    if isinstance(recipe_instructions, list):
+                        for inst in recipe_instructions:
+                            if isinstance(inst, str):
+                                json_ld_instructions.append(inst.strip())
+                            elif isinstance(inst, dict) and inst.get('@type') == 'HowToStep':
+                                step_text = inst.get('text', '')
+                                if step_text and isinstance(step_text, str):
+                                    json_ld_instructions.append(step_text.strip())
+                    
+                    # Validate: >= 2 ingredients and >= 2 instructions
+                    if len(json_ld_ingredients) >= 2 and len(json_ld_instructions) >= 2:
+                        result['ingredients'] = json_ld_ingredients
+                        result['instructions'] = json_ld_instructions
+                        # Extract title from JSON-LD if available
+                        if data.get('name'):
+                            result['title'] = data.get('name')
+                        return result
+            except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+                continue
+    except Exception:
+        pass
+    
+    # All extraction methods failed - return None
+    return None
 
 def extract_servings(soup):
     """Extract number of servings with comprehensive search - collects all matches and returns best one based on scoring."""

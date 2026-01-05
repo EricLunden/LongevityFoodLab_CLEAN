@@ -16,59 +16,62 @@ struct RecipeRemoteImage: View {
     }
 
     var body: some View {
-        Group {
-            if let img = uiImage {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .frame(height: 200)
-                    .clipped()
-                    .cornerRadius(12)
-                    .contentShape(Rectangle())
-            } else if isLoading {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(ProgressView())
-            } else if let err = loadError {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(
-                        VStack(spacing: 6) {
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                            Text("Image failed")
-                                .font(.footnote)
-                                .foregroundColor(.gray)
-                            Text(err)
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 8)
+        // Constrain container from the start to prevent zoom effect
+        // Use GeometryReader to get exact available width and prevent any expansion
+        GeometryReader { geometry in
+            Group {
+                if let img = uiImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)  // Fill entire frame
+                        .frame(width: geometry.size.width, height: 200)  // Use exact width from GeometryReader
+                        .clipped()  // Crop to fill rectangle (no letterboxing)
+                        .cornerRadius(12)
+                        .contentShape(Rectangle())
+                        .onAppear {
+                            print("IMG: image displayed with width=\(geometry.size.width)")
                         }
-                    )
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .onAppear { fetch() }
+                } else if isLoading {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .overlay(ProgressView())
+                } else if let err = loadError {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .overlay(
+                            VStack(spacing: 6) {
+                                Image(systemName: "photo")
+                                    .font(.title2)
+                                    .foregroundColor(.gray)
+                                Text("Image failed")
+                                    .font(.footnote)
+                                    .foregroundColor(.gray)
+                                Text(err)
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 8)
+                            }
+                        )
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.15))
+                        .frame(width: geometry.size.width, height: 200)
+                        .cornerRadius(12)
+                        .onAppear { fetch() }
+                }
+            }
+            .frame(width: geometry.size.width, height: 200)
+            .onAppear {
+                if uiImage == nil && !isLoading { fetch() }
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 200)
-        .onAppear {
-            if uiImage == nil && !isLoading { fetch() }
-        }
+        .frame(height: 200)  // Constrain GeometryReader height
     }
 
     private func fetch() {

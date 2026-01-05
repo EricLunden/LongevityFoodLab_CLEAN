@@ -3224,6 +3224,35 @@ struct RecipeGridCard: View {
                                 )
                                 .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                                 .padding(4)
+                        } else {
+                            // No score - show "TAP to score recipe" circle (same size as score circles)
+                            Circle()
+                                .fill(Color(red: 0.42, green: 0.557, blue: 0.498))
+                                .frame(width: scoreCircleSize, height: scoreCircleSize)
+                                .overlay(
+                                    VStack(spacing: 0) {
+                                        Text("TAP")
+                                            .font(.system(size: scoreCircleSize == 56 ? 17 : scoreCircleSize == 40 ? 13 : 9, weight: .black))
+                                            .foregroundColor(.white)
+                                            .multilineTextAlignment(.center)
+                                        
+                                        VStack(spacing: 0) {
+                                            Text("to score")
+                                                .font(.system(size: scoreCircleSize == 56 ? 8 : scoreCircleSize == 40 ? 7 : 6, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .multilineTextAlignment(.center)
+                                            
+                                            Text("recipe")
+                                                .font(.system(size: scoreCircleSize == 56 ? 8 : scoreCircleSize == 40 ? 7 : 6, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                        .padding(.top, -2)
+                                    }
+                                    .frame(width: scoreCircleSize, height: scoreCircleSize)
+                                )
+                                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                .padding(4)
                         }
                         
                         // Selection Circle (when editing) - top right corner (visual only, not tappable)

@@ -9,6 +9,7 @@ import SwiftUI
 import AVFoundation
 import UIKit
 import CoreImage
+import CoreGraphics
 
 struct ScannerViewController: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
@@ -273,10 +274,27 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
         // Try to get image data
         var image: UIImage?
         
-        // Method 1: Try fileDataRepresentation (preferred)
+        // Method 1: Try fileDataRepresentation (preferred) - Memory-efficient decode
         if let imageData = photo.fileDataRepresentation() {
             print("Scanner: Got image data from fileDataRepresentation, size: \(imageData.count) bytes")
-            image = UIImage(data: imageData)
+            
+            // Memory-efficient decode: downscale during decode to prevent full-resolution image in memory
+            image = autoreleasepool {
+                let options: [CFString: Any] = [
+                    kCGImageSourceThumbnailMaxPixelSize: 1024,
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: false
+                ]
+                
+                guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+                      let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                    print("Scanner: Efficient decode failed, falling back to standard decode")
+                    return UIImage(data: imageData)
+                }
+                
+                return UIImage(cgImage: cgImage)
+            }
         }
         
         // Method 2: Try cgImageRepresentation as fallback

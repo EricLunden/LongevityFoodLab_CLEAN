@@ -20,9 +20,10 @@ struct RecipeRemoteImage: View {
             if let img = uiImage {
                 Image(uiImage: img)
                     .resizable()
-                    .scaledToFit()
+                    .scaledToFill()
                     .frame(maxWidth: .infinity, maxHeight: 200)
                     .frame(height: 200)
+                    .clipped()
                     .cornerRadius(12)
                     .contentShape(Rectangle())
             } else if isLoading {

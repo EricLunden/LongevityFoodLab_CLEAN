@@ -191,9 +191,10 @@ struct RecipePreviewView: View {
                                                 case .success(let image):
                                                     image
                                                         .resizable()
-                                                                .aspectRatio(contentMode: .fit)  // Fit entire image (no cropping)
+                                                                .aspectRatio(contentMode: .fill)  // Fill entire area (may crop)
                                                                 .frame(maxWidth: .infinity)  // Fill available width
                                                                 .frame(height: 200)
+                                                        .clipped()
                                                         .cornerRadius(12)
                                                         .onAppear {
                                                                     print("SE/IMG: AsyncImage success \(fixedImageUrl) isShorts=\(isShorts)")

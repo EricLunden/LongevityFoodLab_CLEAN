@@ -4,7 +4,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const LAMBDA_URL = Deno.env.get('LAMBDA_URL') || 'https://e573obhi3ggyorltf7pjctkbiu0ecxve.lambda-url.us-east-2.on.aws/'
+// Production Lambda alias URL - set via LAMBDA_PROD_URL environment variable
+const LAMBDA_PROD_URL = Deno.env.get('LAMBDA_PROD_URL')
+
+if (!LAMBDA_PROD_URL) {
+  throw new Error('LAMBDA_PROD_URL environment variable is not set. Configure it in Supabase dashboard.')
+}
 
 serve(async (req) => {
   // Handle CORS
@@ -97,7 +102,7 @@ serve(async (req) => {
     const timeoutId = setTimeout(() => controller.abort(), 85000) // 85 seconds (less than 90s Lambda timeout)
     
     try {
-    const lambdaResponse = await fetch(LAMBDA_URL, {
+    const lambdaResponse = await fetch(LAMBDA_PROD_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

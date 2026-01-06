@@ -348,12 +348,17 @@ struct ScanResultView: View {
                                     }
                                 }
                                 .onAppear {
-                                    print("🔍 Combined VStack onAppear - checking for healthier choices")
-                                    loadHealthierChoicesIfNeeded(for: analysis)
+                                    print("🔍 Combined VStack onAppear - scheduling async load for healthier choices")
+                                    // Delay loading to ensure Summary and Health Goals render first
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
+                                        loadHealthierChoicesIfNeeded(for: analysis)
+                                    }
                                 }
                                 .onChange(of: bestPreparation) { oldValue, newValue in
                                     print("🔍 bestPreparation changed from '\(oldValue ?? "nil")' to '\(newValue ?? "nil")'")
-                                    if let newValue = newValue, !newValue.isEmpty {
+                                    // Only use bestPreparation if we don't already have API suggestions
+                                    if grocerySuggestions.isEmpty, let newValue = newValue, !newValue.isEmpty {
                                         convertBestPreparationToSuggestion(newValue, analysisScore: analysis.overallScore)
                                     }
                                 }
@@ -786,27 +791,6 @@ struct ScanResultView: View {
     private func loadHealthierChoicesIfNeeded(for analysis: FoodAnalysis) {
         print("🔍 loadHealthierChoicesIfNeeded called")
         
-        // Check bestPreparation binding first (takes priority)
-        if let bestPrep = bestPreparation, !bestPrep.isEmpty {
-            print("🔍 Found bestPreparation in binding, converting to suggestion")
-            convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
-            return
-        }
-        
-        // Check if analysis already has suggestions
-        if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
-            print("🔍 Found \(cachedSuggestions.count) cached suggestions in analysis")
-            grocerySuggestions = removeDuplicates(cachedSuggestions)
-            return
-        }
-        
-        // Check analysis.bestPreparation directly
-        if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
-            print("🔍 Found bestPreparation in analysis object")
-            convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
-            return
-        }
-        
         // Already loading or already have suggestions - skip
         if isLoadingSuggestions {
             print("🔍 Already loading suggestions, skipping")
@@ -818,8 +802,73 @@ struct ScanResultView: View {
             return
         }
         
-        print("🔍 No suggestions found, waiting for bestPreparation from scanner")
-        // Don't make a separate API call - let the scanner's Step 2 provide bestPreparation
+        // PRIORITY 1: Check if analysis already has API suggestions (these are the best - multiple products with full details)
+        if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
+            print("🔍 Found \(cachedSuggestions.count) cached API suggestions in analysis - using these")
+            grocerySuggestions = removeDuplicates(cachedSuggestions)
+            return
+        }
+        
+        // PRIORITY 2: Load API suggestions if not cached (these provide multiple products with full details)
+        print("🔍 No cached suggestions, loading from API")
+        loadSuggestionsFromAPI(for: analysis)
+        
+        // PRIORITY 3: Fallback to bestPreparation only if API fails (single text suggestion)
+        // This will be handled in the API completion handler
+    }
+    
+    private func loadSuggestionsFromAPI(for analysis: FoodAnalysis) {
+        isLoadingSuggestions = true
+        let nutritionInfo = analysis.nutritionInfoOrDefault
+        
+        AIService.shared.findSimilarGroceryProducts(
+            currentProduct: analysis.foodName,
+            currentScore: analysis.overallScore,
+            nutritionInfo: nutritionInfo
+        ) { result in
+            DispatchQueue.main.async {
+                self.isLoadingSuggestions = false
+                
+                switch result {
+                case .success(let apiSuggestions):
+                    // Remove duplicates and limit to 2 suggestions
+                    let uniqueSuggestions = self.removeDuplicates(apiSuggestions)
+                    self.grocerySuggestions = Array(uniqueSuggestions.prefix(2))
+                    print("🔍 Loaded \(self.grocerySuggestions.count) suggestions from API")
+                    
+                    // Save to cache
+                    self.saveSuggestionsToCache(self.grocerySuggestions, for: analysis)
+                case .failure(let error):
+                    print("🔍 API failed: \(error.localizedDescription), falling back to bestPreparation")
+                    // Fallback to bestPreparation if API fails
+                    if let bestPrep = self.bestPreparation, !bestPrep.isEmpty {
+                        self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                    } else if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
+                        self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                    }
+                }
+            }
+        }
+    }
+    
+    private func saveSuggestionsToCache(_ suggestions: [GrocerySuggestion], for analysis: FoodAnalysis) {
+        guard !suggestions.isEmpty else { return }
+        
+        // Find cache entry by foodName (most recent)
+        let normalizedName = FoodAnalysis.normalizeInput(analysis.foodName)
+        let matchingEntries = foodCacheManager.cachedAnalyses.filter { entry in
+            let entryNormalizedName = FoodAnalysis.normalizeInput(entry.foodName)
+            return entryNormalizedName == normalizedName
+        }
+        
+        if let entry = matchingEntries.sorted(by: { $0.analysisDate > $1.analysisDate }).first {
+            // Update by imageHash if available, otherwise by cacheKey
+            if let imageHash = entry.imageHash {
+                foodCacheManager.updateSuggestions(forImageHash: imageHash, suggestions: suggestions)
+            } else {
+                foodCacheManager.updateSuggestions(forCacheKey: entry.cacheKey, suggestions: suggestions)
+            }
+        }
     }
     
     private func convertBestPreparationToSuggestion(_ bestPreparation: String, analysisScore: Int) {

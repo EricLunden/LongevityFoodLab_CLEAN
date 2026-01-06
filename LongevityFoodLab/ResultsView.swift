@@ -294,8 +294,8 @@ struct ResultsView: View {
                     healthScoresGrid
                     
                     // Healthier Choices (only for scanned products) - moved up below Health Goals grid
-                    let bestPrep = currentAnalysis.bestPreparationOrDefault
-                    if !bestPrep.isEmpty && isHealthierChoicesText(bestPrep) {
+                    let isGrocery = analysis.scanType == "product" || analysis.scanType == "nutrition_label"
+                    if isGrocery {
                         HealthierChoicesView(analysis: currentAnalysis)
                     }
                     
@@ -303,7 +303,6 @@ struct ResultsView: View {
                     ingredientsAnalysisDropdown
                     
                     // Your Macronutrients dropdown (hidden for groceries only)
-                    let isGrocery = analysis.scanType == "product" || analysis.scanType == "nutrition_label"
                     if !isGrocery {
                         macrosDropdownTrackerStyle
                     }
@@ -319,6 +318,7 @@ struct ResultsView: View {
                     }
                     
                     // Best Practices dropdown (if available)
+                    let bestPrep = currentAnalysis.bestPreparationOrDefault
                     if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
                         bestPracticesDropdown
                     }
@@ -380,6 +380,20 @@ struct ResultsView: View {
         }
         .onAppear {
             loadImage()
+            
+            // Ensure currentAnalysis has the latest cached data including suggestions
+            // Refresh from cache to get the most up-to-date suggestions
+            if let entry = foodCacheManager.cachedAnalyses.first(where: { entry in
+                entry.foodName == analysis.foodName &&
+                entry.fullAnalysis.overallScore == analysis.overallScore
+            }) {
+                cachedEntry = entry
+                currentAnalysis = entry.fullAnalysis
+                print("🔍 ResultsView: Refreshed currentAnalysis from cache, has suggestions: \(entry.fullAnalysis.suggestions != nil && !(entry.fullAnalysis.suggestions?.isEmpty ?? true))")
+            } else if let entry = cachedEntry {
+                // Fallback to already loaded cachedEntry
+                currentAnalysis = entry.fullAnalysis
+            }
             
             // Load selected macros/micros
             if selectedMacros.isEmpty {
@@ -1371,6 +1385,8 @@ struct ResultsView: View {
         }) {
             cachedEntry = entry
             isFavorite = entry.isFavorite
+            // Update currentAnalysis with cached entry's fullAnalysis to include suggestions
+            currentAnalysis = entry.fullAnalysis
             
             if let imageHash = entry.imageHash {
                 // Direct lookup - instant load from disk
@@ -1397,6 +1413,8 @@ struct ResultsView: View {
                 DispatchQueue.main.async {
                     self.cachedEntry = matchingEntry
                     self.isFavorite = matchingEntry.isFavorite
+                    // Update currentAnalysis with cached entry's fullAnalysis to include suggestions
+                    self.currentAnalysis = matchingEntry.fullAnalysis
                 }
                 
                 if let imageHash = matchingEntry.imageHash {

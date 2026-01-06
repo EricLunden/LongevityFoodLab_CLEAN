@@ -23,10 +23,16 @@ struct HealthierChoicesView: View {
                     isExpanded.toggle()
                     // Load suggestions only when expanded for the first time
                     if isExpanded && suggestions.isEmpty && !isLoading {
-                        // Check cache first
-                        if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
+                        // Always check cache first (most up-to-date) since suggestions may be saved asynchronously
+                        if let cachedSuggestions = getCachedSuggestions(), !cachedSuggestions.isEmpty {
+                            print("🔍 HealthierChoicesView: Using suggestions from cache lookup")
+                            suggestions = removeDuplicates(cachedSuggestions)
+                        } else if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
+                            // Fallback to analysis.suggestions
+                            print("🔍 HealthierChoicesView: Using suggestions from analysis.suggestions")
                             suggestions = removeDuplicates(cachedSuggestions)
                         } else {
+                            print("🔍 HealthierChoicesView: No cached suggestions, calling API")
                             loadHealthierChoices()
                         }
                     }
@@ -126,6 +132,50 @@ struct HealthierChoicesView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Get Cached Suggestions
+    private func getCachedSuggestions() -> [GrocerySuggestion]? {
+        print("🔍 HealthierChoicesView: Looking for cached suggestions for '\(analysis.foodName)' score \(analysis.overallScore)")
+        print("🔍 HealthierChoicesView: Total cache entries: \(foodCacheManager.cachedAnalyses.count)")
+        
+        // First try: exact match by foodName and score (most reliable)
+        if let entry = foodCacheManager.cachedAnalyses.first(where: { entry in
+            entry.foodName == analysis.foodName &&
+            entry.fullAnalysis.overallScore == analysis.overallScore
+        }) {
+            print("🔍 HealthierChoicesView: Found exact match entry, has suggestions: \(entry.fullAnalysis.suggestions != nil), count: \(entry.fullAnalysis.suggestions?.count ?? 0)")
+            if let suggestions = entry.fullAnalysis.suggestions, !suggestions.isEmpty {
+                print("🔍 HealthierChoicesView: Found cached suggestions via exact match")
+                return suggestions
+            } else {
+                print("🔍 HealthierChoicesView: Exact match entry exists but has no suggestions")
+            }
+        } else {
+            print("🔍 HealthierChoicesView: No exact match found")
+        }
+        
+        // Second try: normalized name match with score
+        let normalizedName = FoodAnalysis.normalizeInput(analysis.foodName)
+        let matchingEntries = foodCacheManager.cachedAnalyses.filter { entry in
+            let entryNormalizedName = FoodAnalysis.normalizeInput(entry.foodName)
+            return entryNormalizedName == normalizedName &&
+                   entry.fullAnalysis.overallScore == analysis.overallScore
+        }
+        
+        print("🔍 HealthierChoicesView: Found \(matchingEntries.count) normalized matches")
+        
+        // Get the most recent entry that matches
+        if let entry = matchingEntries.sorted(by: { $0.analysisDate > $1.analysisDate }).first {
+            print("🔍 HealthierChoicesView: Normalized match entry, has suggestions: \(entry.fullAnalysis.suggestions != nil), count: \(entry.fullAnalysis.suggestions?.count ?? 0)")
+            if let suggestions = entry.fullAnalysis.suggestions, !suggestions.isEmpty {
+                print("🔍 HealthierChoicesView: Found cached suggestions via normalized match")
+                return suggestions
+            }
+        }
+        
+        print("🔍 HealthierChoicesView: No cached suggestions found after all attempts")
+        return nil
     }
     
     // MARK: - Save Suggestions to Cache

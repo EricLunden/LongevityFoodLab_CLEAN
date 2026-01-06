@@ -8,6 +8,7 @@ struct SupplementsView: View {
     @State private var showingScanResult = false
     @State private var capturedImage: UIImage?
     @State private var scanResultAnalysis: FoodAnalysis?
+    @State private var scanResultBestPreparation: String? = nil // Not used for supplements, but required for ScanResultView
     @State private var scanType: ScanType = .supplement
     @State private var needsBackScan = false
     @State private var currentImageHash: String?
@@ -91,6 +92,7 @@ struct SupplementsView: View {
                 ScanResultView(
                     scanType: scanType,
                     analysis: analysis,
+                    bestPreparation: $scanResultBestPreparation,
                     image: capturedImage,
                     isAnalyzing: false,
                     needsBackScan: needsBackScan,
@@ -115,6 +117,7 @@ struct SupplementsView: View {
                 ScanResultView(
                     scanType: scanType,
                     analysis: nil,
+                    bestPreparation: $scanResultBestPreparation,
                     image: capturedImage,
                     isAnalyzing: true,
                     needsBackScan: false,

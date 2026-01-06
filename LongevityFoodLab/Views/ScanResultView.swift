@@ -30,6 +30,8 @@ struct ScanResultView: View {
     
     @State private var animatedScore: Int = 0
     @State private var isAnimating: Bool = false
+    @State private var grocerySuggestions: [GrocerySuggestion] = []
+    @State private var isLoadingSuggestions = false
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     
@@ -311,12 +313,50 @@ struct ScanResultView: View {
                                     summarySection(analysis: analysis)
                                 }
                                 
-                                // Health Goals Section - renders immediately (no async dependencies)
-                                healthGoalsSection(analysis: analysis)
-                                
-                                // Healthier Choices Section - loads asynchronously after view appears
-                                // Uses HealthierChoicesContainerView which handles all loading off main thread
-                                HealthierChoicesContainerView(analysis: analysis, bestPreparation: $bestPreparation)
+                                // Combined Health Goals + Healthier Choices (ALWAYS RENDERS because Health Goals has content)
+                                VStack(spacing: 16) {
+                                    // Health Goals Section (always renders - has content)
+                                    healthGoalsSection(analysis: analysis)
+                                    
+                                    // Healthier Choices Section (part of same VStack, so modifiers always fire)
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        if isLoadingSuggestions {
+                                            VStack(spacing: 8) {
+                                                ProgressView()
+                                                    .scaleEffect(0.8)
+                                                Text("Finding healthier alternatives...")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            .padding(.vertical, 12)
+                                            .frame(maxWidth: .infinity)
+                                        } else if !grocerySuggestions.isEmpty {
+                                            Text("Healthier Choices:")
+                                                .font(.headline)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(.primary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .multilineTextAlignment(.leading)
+                                            
+                                            VStack(spacing: 12) {
+                                                ForEach(grocerySuggestions, id: \.productName) { suggestion in
+                                                    suggestionCard(suggestion)
+                                                }
+                                            }
+                                        }
+                                        // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
+                                    }
+                                }
+                                .onAppear {
+                                    print("🔍 Combined VStack onAppear - checking for healthier choices")
+                                    loadHealthierChoicesIfNeeded(for: analysis)
+                                }
+                                .onChange(of: bestPreparation) { oldValue, newValue in
+                                    print("🔍 bestPreparation changed from '\(oldValue ?? "nil")' to '\(newValue ?? "nil")'")
+                                    if let newValue = newValue, !newValue.isEmpty {
+                                        convertBestPreparationToSuggestion(newValue, analysisScore: analysis.overallScore)
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -739,6 +779,85 @@ struct ScanResultView: View {
                 }
             }
         )
+    }
+    
+    // MARK: - Healthier Choices Loading
+    
+    private func loadHealthierChoicesIfNeeded(for analysis: FoodAnalysis) {
+        print("🔍 loadHealthierChoicesIfNeeded called")
+        
+        // Check bestPreparation binding first (takes priority)
+        if let bestPrep = bestPreparation, !bestPrep.isEmpty {
+            print("🔍 Found bestPreparation in binding, converting to suggestion")
+            convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+            return
+        }
+        
+        // Check if analysis already has suggestions
+        if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
+            print("🔍 Found \(cachedSuggestions.count) cached suggestions in analysis")
+            grocerySuggestions = removeDuplicates(cachedSuggestions)
+            return
+        }
+        
+        // Check analysis.bestPreparation directly
+        if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
+            print("🔍 Found bestPreparation in analysis object")
+            convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+            return
+        }
+        
+        // Already loading or already have suggestions - skip
+        if isLoadingSuggestions {
+            print("🔍 Already loading suggestions, skipping")
+            return
+        }
+        
+        if !grocerySuggestions.isEmpty {
+            print("🔍 Already have suggestions, skipping")
+            return
+        }
+        
+        print("🔍 No suggestions found, waiting for bestPreparation from scanner")
+        // Don't make a separate API call - let the scanner's Step 2 provide bestPreparation
+    }
+    
+    private func convertBestPreparationToSuggestion(_ bestPreparation: String, analysisScore: Int) {
+        print("🔍 Converting bestPreparation to suggestion card")
+        
+        // Parse the bestPreparation text to extract product name
+        // Format is usually: "Product Name: Description..." or just description
+        let components = bestPreparation.components(separatedBy: ":")
+        let productName = components.first?.trimmingCharacters(in: .whitespaces) ?? "Healthier Alternative"
+        let reason = components.count > 1 ? components.dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces) : bestPreparation
+        
+        let suggestion = GrocerySuggestion(
+            brandName: "",
+            productName: productName,
+            score: min(analysisScore + 15, 100),  // Suggested item scores higher
+            reason: reason,
+            keyBenefits: [],
+            priceRange: "",
+            availability: "Available at most grocery stores"
+        )
+        
+        print("🔍 Created suggestion: \(productName) with score \(suggestion.score)")
+        grocerySuggestions = [suggestion]
+    }
+    
+    private func removeDuplicates(_ suggestions: [GrocerySuggestion]) -> [GrocerySuggestion] {
+        var seen = Set<String>()
+        var unique: [GrocerySuggestion] = []
+        
+        for suggestion in suggestions {
+            let key = "\(suggestion.brandName)_\(suggestion.productName)".lowercased()
+            if !seen.contains(key) {
+                seen.insert(key)
+                unique.append(suggestion)
+            }
+        }
+        
+        return unique
     }
     
     

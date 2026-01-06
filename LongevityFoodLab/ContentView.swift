@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var scanType: ScanType = .food
     @State private var needsBackScan = false
     @State private var currentImageHash: String?
+    @State private var detectedBarcode: String?
     
     var body: some View {
         TabView(selection: $currentTab) {
@@ -214,12 +215,13 @@ struct ContentView: View {
             RecipeDetailView(recipe: recipe)
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            ScannerViewController(isPresented: $showingScanner) { image in
-                print("ContentView: Image captured callback received")
+            ScannerViewController(isPresented: $showingScanner) { image, barcode in
+                print("ContentView: Image captured callback received, barcode: \(barcode ?? "none")")
                 
-                // Store image IMMEDIATELY on main thread (before dismissing camera)
+                // Store image and barcode IMMEDIATELY on main thread (before dismissing camera)
                 // This ensures state is set before sheet renders
                 capturedImage = image
+                detectedBarcode = barcode
                 
                 // Dismiss camera FIRST (SwiftUI can't show sheet while fullScreenCover is active)
                 showingScanner = false
@@ -228,8 +230,8 @@ struct ContentView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     // Show results sheet with loading state (image is already set)
                     showingScanResult = true
-                    // Start analysis
-                    analyzeScannedImage(image)
+                    // Start analysis (barcode will be used in Phase 2)
+                    analyzeScannedImage(image, barcode: barcode)
                 }
             }
         }
@@ -366,13 +368,16 @@ struct ContentView: View {
     
     // MARK: - Scanner Functions
     
-    private func analyzeScannedImage(_ image: UIImage) {
-        print("Scanner: Starting image analysis")
+    private func analyzeScannedImage(_ image: UIImage, barcode: String? = nil) {
+        print("Scanner: Starting image analysis, barcode: \(barcode ?? "none")")
         
         // Reset state
         scanResultAnalysis = nil
         needsBackScan = false
         scanType = .food
+        
+        // Phase 1: Barcode detection complete - barcode is now available
+        // Phase 2: Will use barcode for OpenFoodFacts lookup
         
         // Optimize image (resize + compress) for faster API uploads
         guard let imageData = image.optimizedForAPI() else {
@@ -397,31 +402,91 @@ struct ContentView: View {
             return
         }
         
-        let base64Image = imageData.base64EncodedString()
-        print("Scanner: Image converted to base64, length: \(base64Image.count)")
+        // TIERED BACKUP SYSTEM (Phase 3)
+        // Tier 1: OpenFoodFacts API (if barcode available)
+        // Tier 2: AI Vision API (fallback)
         
-        // showingScanResult is already set in the callback above
-        
-        // Call OpenAI Vision API
-        Task {
-            do {
-                print("Scanner: Calling OpenAI Vision API")
-                let analysis = try await analyzeImageWithOpenAI(base64Image: base64Image, imageHash: imageHash)
+        if let barcode = barcode, !barcode.isEmpty {
+            print("Scanner: Barcode detected, attempting Tier 1: OpenFoodFacts lookup")
+            
+            Task {
+                do {
+                    // Tier 1: Try OpenFoodFacts API
+                    if let product = try await OpenFoodFactsService.shared.getProduct(barcode: barcode) {
+                        // Check if product has meaningful nutrition data before using it
+                        if OpenFoodFactsService.shared.hasMeaningfulNutritionData(product) {
+                            print("Scanner: Tier 1 SUCCESS - Product found in OpenFoodFacts with nutrition data")
+                            
+                            // Map to FoodAnalysis
+                            let analysis = OpenFoodFactsService.shared.mapToFoodAnalysis(product)
+                            
+                            await MainActor.run {
+                                print("Scanner: OpenFoodFacts analysis received, score: \(analysis.overallScore)")
+                                scanResultAnalysis = analysis
+                                determineScanTypeAndBackScanNeeded(analysis: analysis)
+                                
+                                // Cache the analysis with image hash and scanType
+                                let scanTypeString = analysis.scanType ?? scanType.rawValue
+                                foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanTypeString, inputMethod: nil)
+                            }
+                            return // Success - exit early
+                        } else {
+                            print("Scanner: Tier 1 - Product found but missing nutrition data, falling back to Tier 2")
+                            // Fall through to Tier 2
+                        }
+                    } else {
+                        print("Scanner: Tier 1 FAILED - Product not found in OpenFoodFacts, falling back to Tier 2")
+                        // Fall through to Tier 2
+                    }
+                } catch {
+                    print("Scanner: Tier 1 ERROR - \(error.localizedDescription), falling back to Tier 2")
+                    // Fall through to Tier 2
+                }
                 
-                await MainActor.run {
-                    print("Scanner: Analysis received, score: \(analysis.overallScore)")
-                    scanResultAnalysis = analysis
-                    determineScanTypeAndBackScanNeeded(analysis: analysis)
-                    
-                    // Cache the analysis with image hash and scanType
-                    let scanTypeString = analysis.scanType ?? scanType.rawValue
-                    foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanTypeString, inputMethod: nil)
-                }
-            } catch {
-                print("Scanner: Analysis failed: \(error.localizedDescription)")
-                await MainActor.run {
-                    showingScanResult = false
-                }
+                // Tier 2: Fallback to AI Vision API
+                await performTier2Analysis(image: image, imageHash: imageHash)
+            }
+        } else {
+            print("Scanner: No barcode detected, using Tier 2: AI Vision API")
+            
+            // Tier 2: AI Vision API (no barcode available)
+            Task {
+                await performTier2Analysis(image: image, imageHash: imageHash)
+            }
+        }
+    }
+    
+    // MARK: - Tier 2: AI Vision API Fallback
+    
+    private func performTier2Analysis(image: UIImage, imageHash: String) async {
+        // Optimize image (resize + compress) for faster API uploads
+        guard let imageData = image.optimizedForAPI() else {
+            print("Scanner: Failed to optimize image")
+            await MainActor.run {
+                showingScanResult = false
+            }
+            return
+        }
+        
+        let base64Image = imageData.base64EncodedString()
+        print("Scanner: Tier 2 - Calling OpenAI Vision API")
+        
+        do {
+            let analysis = try await analyzeImageWithOpenAI(base64Image: base64Image, imageHash: imageHash)
+            
+            await MainActor.run {
+                print("Scanner: Tier 2 - Analysis received, score: \(analysis.overallScore)")
+                scanResultAnalysis = analysis
+                determineScanTypeAndBackScanNeeded(analysis: analysis)
+                
+                // Cache the analysis with image hash and scanType
+                let scanTypeString = analysis.scanType ?? scanType.rawValue
+                foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanTypeString, inputMethod: nil)
+            }
+        } catch {
+            print("Scanner: Tier 2 - Analysis failed: \(error.localizedDescription)")
+            await MainActor.run {
+                showingScanResult = false
             }
         }
     }

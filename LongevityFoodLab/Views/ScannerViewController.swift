@@ -10,10 +10,11 @@ import AVFoundation
 import UIKit
 import CoreImage
 import CoreGraphics
+import Vision
 
 struct ScannerViewController: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
-    let onImageCaptured: (UIImage) -> Void
+    let onImageCaptured: (UIImage, String?) -> Void
     
     func makeUIViewController(context: Context) -> ScannerVC {
         let controller = ScannerVC()
@@ -36,9 +37,9 @@ struct ScannerViewController: UIViewControllerRepresentable {
             self.parent = parent
         }
         
-        func didCaptureImage(_ image: UIImage) {
+        func didCaptureImage(_ image: UIImage, barcode: String?) {
             // Call the callback immediately - don't dismiss camera yet
-            parent.onImageCaptured(image)
+            parent.onImageCaptured(image, barcode)
             // Don't dismiss here - let ContentView handle it after sheet shows
         }
         
@@ -49,7 +50,7 @@ struct ScannerViewController: UIViewControllerRepresentable {
 }
 
 protocol ScannerVCDelegate: AnyObject {
-    func didCaptureImage(_ image: UIImage)
+    func didCaptureImage(_ image: UIImage, barcode: String?)
     func didCancel()
 }
 
@@ -320,10 +321,72 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
         }
         
         print("Scanner: Image extracted successfully, processing...")
-        processCapturedImage(capturedImage)
+        
+        // Detect barcode in the captured image
+        detectBarcode(in: capturedImage) { [weak self] barcode in
+            if let barcode = barcode {
+                print("Scanner: Barcode detected: \(barcode)")
+            } else {
+                print("Scanner: No barcode detected")
+            }
+            self?.processCapturedImage(capturedImage, barcode: barcode)
+        }
     }
     
-    private func processCapturedImage(_ image: UIImage) {
+    // MARK: - Barcode Detection
+    
+    private func detectBarcode(in image: UIImage, completion: @escaping (String?) -> Void) {
+        guard let cgImage = image.cgImage else {
+            print("Scanner: No CGImage available for barcode detection")
+            completion(nil)
+            return
+        }
+        
+        let request = VNDetectBarcodesRequest { request, error in
+            if let error = error {
+                print("Scanner: Barcode detection error: \(error.localizedDescription)")
+                completion(nil)
+                return
+            }
+            
+            guard let observations = request.results as? [VNBarcodeObservation] else {
+                print("Scanner: No barcode observations found")
+                completion(nil)
+                return
+            }
+            
+            // Return the first detected barcode
+            for observation in observations {
+                if let payload = observation.payloadStringValue {
+                    print("Scanner: Barcode detected - type: \(observation.symbology.rawValue), value: \(payload)")
+                    completion(payload)
+                    return
+                }
+            }
+            
+            print("Scanner: Barcode observations found but no payload string value")
+            completion(nil)
+        }
+        
+        // Configure barcode types to detect (common product barcodes)
+        // Note: .UPCA doesn't exist in Vision framework, UPC-A is typically detected as .EAN13
+        request.symbologies = [.EAN13, .EAN8, .UPCE, .code128, .code39, .code93]
+        
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try handler.perform([request])
+            } catch {
+                print("Scanner: Failed to perform barcode detection: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    completion(nil)
+                }
+            }
+        }
+    }
+    
+    private func processCapturedImage(_ image: UIImage, barcode: String?) {
         // Compress image: 1024x1024, JPEG 0.8 quality, ~300-500KB target
         let targetSize = CGSize(width: 1024, height: 1024)
         let compressedImage = image.resized(to: targetSize)
@@ -336,10 +399,10 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
         
         print("Scanner: Image captured and compressed to \(compressedData.count) bytes")
         
-        // Return compressed image
+        // Return compressed image with barcode
         if let finalImage = UIImage(data: compressedData) {
             DispatchQueue.main.async {
-                self.delegate?.didCaptureImage(finalImage)
+                self.delegate?.didCaptureImage(finalImage, barcode: barcode)
             }
         } else {
             print("Scanner: Failed to create final image from compressed data")

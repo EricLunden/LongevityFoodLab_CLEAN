@@ -49,8 +49,8 @@ struct SupplementsView: View {
             )
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            ScannerViewController(isPresented: $showingScanner) { image in
-                print("SupplementsView: Image captured callback received")
+            ScannerViewController(isPresented: $showingScanner) { image, barcode in
+                print("SupplementsView: Image captured callback received, barcode: \(barcode ?? "none")")
                 
                 // Store image IMMEDIATELY on main thread (before dismissing camera)
                 capturedImage = image
@@ -62,8 +62,8 @@ struct SupplementsView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     // Show results sheet with loading state (image is already set)
                     showingScanResult = true
-                    // Start analysis
-                    analyzeScannedImage(image)
+                    // Start analysis (barcode will be used in Phase 2 for supplements if needed)
+                    analyzeScannedImage(image, barcode: barcode)
                 }
             }
         }
@@ -115,13 +115,16 @@ struct SupplementsView: View {
     
     // MARK: - Scanner Functions
     
-    private func analyzeScannedImage(_ image: UIImage) {
-        print("SupplementsView: Starting image analysis")
+    private func analyzeScannedImage(_ image: UIImage, barcode: String? = nil) {
+        print("SupplementsView: Starting image analysis, barcode: \(barcode ?? "none")")
         
         // Reset state
         scanResultAnalysis = nil
         needsBackScan = false
         scanType = .supplement
+        
+        // Phase 1: Barcode detection complete - barcode is now available
+        // Phase 2: Will use barcode if supplement lookup APIs are added
         
         // Optimize image (resize + compress) for faster API uploads
         guard let imageData = image.optimizedForAPI() else {

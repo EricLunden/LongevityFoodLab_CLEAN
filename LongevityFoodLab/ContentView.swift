@@ -22,11 +22,13 @@ struct ContentView: View {
     // Scanner state
     @State private var showingScanner = false
     @State private var showingScanResult = false
-    @State private var capturedImage: UIImage?
+    @State private var capturedImage: UIImage? // Barcode scan image (for analysis)
+    @State private var frontLabelImage: UIImage? // Front label image (for grid display)
     @State private var scanResultAnalysis: FoodAnalysis?
     @State private var scanType: ScanType = .food
     @State private var needsBackScan = false
-    @State private var currentImageHash: String?
+    @State private var currentImageHash: String? // Hash for barcode image (analysis)
+    @State private var frontLabelImageHash: String? // Hash for front label image (grid)
     @State private var detectedBarcode: String?
     
     var body: some View {
@@ -215,64 +217,101 @@ struct ContentView: View {
             RecipeDetailView(recipe: recipe)
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            ScannerViewController(isPresented: $showingScanner) { image, barcode in
-                print("ContentView: Image captured callback received, barcode: \(barcode ?? "none")")
-                
-                // Store image and barcode IMMEDIATELY on main thread (before dismissing camera)
-                // This ensures state is set before sheet renders
-                capturedImage = image
-                detectedBarcode = barcode
-                
-                // Dismiss camera FIRST (SwiftUI can't show sheet while fullScreenCover is active)
-                showingScanner = false
-                
-                // Wait for camera to dismiss, then show results sheet
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    // Show results sheet with loading state (image is already set)
-                    showingScanResult = true
-                    // Start analysis (barcode will be used in Phase 2)
+            ScannerViewController(
+                isPresented: $showingScanner,
+                onBarcodeCaptured: { image, barcode in
+                    print("ContentView: Barcode image captured, barcode: \(barcode ?? "none")")
+                    
+                    // Store barcode image and barcode for analysis
+                    capturedImage = image
+                    detectedBarcode = barcode
+                    
+                    // Generate hash for barcode image
+                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                        currentImageHash = FoodCacheManager.hashImage(imageData)
+                    }
+                    
+                    // Start analysis immediately (don't wait for front label)
                     analyzeScannedImage(image, barcode: barcode)
+                },
+                onFrontLabelCaptured: { image in
+                    print("ContentView: Front label image captured")
+                    
+                    // Store front label image for grid display
+                    frontLabelImage = image
+                    
+                    // Generate hash for front label image
+                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                        frontLabelImageHash = FoodCacheManager.hashImage(imageData)
+                    }
+                    
+                    // Dismiss camera
+                    showingScanner = false
+                    
+                    // Show results sheet after a brief delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showingScanResult = true
+                    }
                 }
-            }
+            )
         }
         .sheet(isPresented: $showingScanResult) {
             // Show loading state if analysis is nil, or results if analysis exists
             ScanResultView(
                 scanType: scanType,
                 analysis: scanResultAnalysis,
-                image: capturedImage,
+                image: frontLabelImage ?? capturedImage, // Show front label if available, otherwise barcode image
                 isAnalyzing: scanResultAnalysis == nil,
                 needsBackScan: needsBackScan,
                 onTrack: {
                     // Track food/meal - add to Meal Tracker immediately
-                    if let analysis = scanResultAnalysis, let image = capturedImage, let imageHash = currentImageHash {
-                        // Store image first
-                        foodCacheManager.saveImage(image, forHash: imageHash)
-                        // Then cache analysis
-                        foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil) // Image entry
+                    if let analysis = scanResultAnalysis {
+                        // Use front label image for grid display if available, otherwise use barcode image
+                        let displayImage = frontLabelImage ?? capturedImage
+                        let displayImageHash = frontLabelImageHash ?? currentImageHash
+                        
+                        if let image = displayImage, let imageHash = displayImageHash {
+                            // Store image first
+                            foodCacheManager.saveImage(image, forHash: imageHash)
+                            // Then cache analysis with front label image hash for grid display
+                            foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil)
+                        }
                     }
                     showingScanResult = false
                     currentImageHash = nil
+                    frontLabelImageHash = nil
                     capturedImage = nil
+                    frontLabelImage = nil
                     currentTab = 3 // Switch to Meals tab (now tag 3)
                 },
                 onSave: {
                     // Save product/supplement - save to Recently Analyzed
-                    if let analysis = scanResultAnalysis, let image = capturedImage, let imageHash = currentImageHash {
-                        // Store image first
-                        foodCacheManager.saveImage(image, forHash: imageHash)
-                        // Then cache analysis
-                        foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil) // Image entry
+                    if let analysis = scanResultAnalysis {
+                        // Use front label image for grid display if available, otherwise use barcode image
+                        let displayImage = frontLabelImage ?? capturedImage
+                        let displayImageHash = frontLabelImageHash ?? currentImageHash
+                        
+                        if let image = displayImage, let imageHash = displayImageHash {
+                            // Store image first
+                            foodCacheManager.saveImage(image, forHash: imageHash)
+                            // Then cache analysis with front label image hash for grid display
+                            foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil)
+                        }
                     }
                     showingScanResult = false
                     currentImageHash = nil
+                    frontLabelImageHash = nil
                     capturedImage = nil
+                    frontLabelImage = nil
                 },
                 onScanAgain: {
                     // Scan again - reopen camera immediately
                     showingScanResult = false
                     scanResultAnalysis = nil
                     capturedImage = nil
+                    frontLabelImage = nil
+                    currentImageHash = nil
+                    frontLabelImageHash = nil
                     currentImageHash = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         showingScanner = true
@@ -511,8 +550,13 @@ struct ContentView: View {
         // Build OpenFoodFacts data section if available
         var openFoodFactsSection = ""
         if let product = openFoodFactsProduct {
-            let productName = product.productNameEnImported ?? product.productNameEn ?? product.productName ?? "Unknown Product"
-            let brand = product.brands ?? ""
+            // Use the same clean name building logic as OpenFoodFactsService
+            let productName = buildCleanProductNameForPrompt(
+                brand: product.brands,
+                productNameEnImported: product.productNameEnImported,
+                productNameEn: product.productNameEn,
+                productName: product.productName
+            )
             let ingredients = product.ingredientsText ?? ""
             let novaGroup = product.novaGroup.map { String($0) } ?? "unknown"
             
@@ -549,7 +593,7 @@ struct ContentView: View {
             AUTHORITATIVE PRODUCT DATA FROM OPENFOODFACTS DATABASE:
             ════════════════════════════════════════════════════════════════════════════
             
-            Product Name: \(brand.isEmpty ? productName : "\(brand) \(productName)")
+            Product Name: \(productName)
             NOVA Group (Processing Level): \(novaGroup) (1=unprocessed, 2=minimally processed, 3=processed, 4=ultra-processed)
             
             NUTRITION FACTS (per serving or per 100g):
@@ -863,8 +907,24 @@ struct ContentView: View {
             let nutritionInfo = OpenFoodFactsService.shared.mapNutritionInfo(from: nutriments)
             let servingSize = product.nutriments?.servingSize ?? analysis.servingSize
             
+            // Use OpenFoodFacts product name (with brand) as authoritative source
+            // The AI might return generic names like "Yogurt" but OpenFoodFacts has the exact product name
+            let openFoodFactsProductName = buildCleanProductNameForPrompt(
+                brand: product.brands,
+                productNameEnImported: product.productNameEnImported,
+                productNameEn: product.productNameEn,
+                productName: product.productName
+            )
+            
+            // Always prefer OpenFoodFacts name when available (it's authoritative from barcode lookup)
+            // This ensures we get "Fage Total 2% Yogurt" instead of just "Yogurt"
+            let finalProductName = (!openFoodFactsProductName.isEmpty && 
+                                   openFoodFactsProductName.lowercased() != "unknown product") 
+                                   ? openFoodFactsProductName 
+                                   : analysis.foodName
+            
             analysis = FoodAnalysis(
-                foodName: analysis.foodName,
+                foodName: finalProductName,
                 overallScore: analysis.overallScore,
                 summary: analysis.summary,
                 healthScores: analysis.healthScores,
@@ -879,6 +939,7 @@ struct ContentView: View {
             )
             
             print("Scanner: Merged OpenFoodFacts nutrition data into analysis")
+            print("Scanner: Using product name: '\(finalProductName)' (OpenFoodFacts: '\(openFoodFactsProductName)', AI: '\(analysis.foodName)')")
         }
         
         print("Scanner: Decoded analysis - scanType: '\(analysis.scanType ?? "nil")', bestPreparation: '\(analysis.bestPreparation)'")
@@ -1064,6 +1125,85 @@ struct ContentView: View {
         
         print("Scanner: Step 2 - Successfully extracted recommendation: '\(recommendation)'")
         return recommendation.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Build a clean product name by removing duplicates and redundant information (same logic as OpenFoodFactsService)
+    private func buildCleanProductNameForPrompt(
+        brand: String?,
+        productNameEnImported: String?,
+        productNameEn: String?,
+        productName: String?
+    ) -> String {
+        // Priority order: imported name > English name > product name
+        var nameToUse: String?
+        
+        if let imported = productNameEnImported, !imported.isEmpty {
+            nameToUse = imported
+        } else if let enName = productNameEn, !enName.isEmpty {
+            nameToUse = enName
+        } else if let name = productName, !name.isEmpty {
+            nameToUse = name
+        }
+        
+        // Clean the name: remove redundant comma-separated parts
+        if let name = nameToUse {
+            // Split by comma and take the first meaningful part
+            let parts = name.components(separatedBy: ",")
+            var cleanedName = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? name
+            
+            // Remove duplicate words within the name itself
+            cleanedName = removeDuplicateWords(from: cleanedName)
+            nameToUse = cleanedName
+        }
+        
+        // Combine with brand if available
+        if let brand = brand, !brand.isEmpty, let name = nameToUse {
+            let brandLower = brand.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let nameLower = name.lowercased()
+            
+            // Check if brand (or significant parts of it) is already in the name
+            // Split brand into words and check if any significant word is in the name
+            let brandWords = brandLower.components(separatedBy: .whitespaces).filter { $0.count > 2 }
+            let brandAlreadyInName = brandWords.contains { nameLower.contains($0) } || nameLower.contains(brandLower)
+            
+            if !brandAlreadyInName {
+                // Combine brand + name, removing duplicate words
+                let combined = "\(brand) \(name)"
+                return removeDuplicateWords(from: combined)
+            } else {
+                // Brand already in name, just clean it
+                return removeDuplicateWords(from: name)
+            }
+        } else if let name = nameToUse {
+            return name
+        } else if let brand = brand, !brand.isEmpty {
+            return brand
+        } else {
+            return "Unknown Product"
+        }
+    }
+    
+    /// Remove duplicate words from a string (case-insensitive)
+    private func removeDuplicateWords(from text: String) -> String {
+        let words = text.components(separatedBy: .whitespaces)
+        var seenWords = Set<String>()
+        var result: [String] = []
+        
+        for word in words {
+            let wordLower = word.lowercased()
+            // Skip empty strings and very short words (like "a", "an", "the")
+            if word.isEmpty || (word.count <= 2 && wordLower != "hp") {
+                continue
+            }
+            
+            // Check if we've seen this word (case-insensitive)
+            if !seenWords.contains(wordLower) {
+                seenWords.insert(wordLower)
+                result.append(word)
+            }
+        }
+        
+        return result.joined(separator: " ")
     }
     
     private func determineScanTypeAndBackScanNeeded(analysis: FoodAnalysis) {

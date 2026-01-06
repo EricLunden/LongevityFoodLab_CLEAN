@@ -23,7 +23,7 @@ struct SupplementsView: View {
             )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+            .toolbar(content: {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.3)) {
@@ -37,7 +37,7 @@ struct SupplementsView: View {
                             .padding(.leading, 8)
                     }
                 }
-            }
+            })
             .overlay(
                 Group {
                     if showingSideMenu {
@@ -49,23 +49,42 @@ struct SupplementsView: View {
             )
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            ScannerViewController(isPresented: $showingScanner) { image, barcode in
-                print("SupplementsView: Image captured callback received, barcode: \(barcode ?? "none")")
-                
-                // Store image IMMEDIATELY on main thread (before dismissing camera)
-                capturedImage = image
-                
-                // Dismiss camera FIRST
-                showingScanner = false
-                
-                // Wait for camera to dismiss, then show results sheet
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    // Show results sheet with loading state (image is already set)
-                    showingScanResult = true
-                    // Start analysis (barcode will be used in Phase 2 for supplements if needed)
+            ScannerViewController(
+                isPresented: $showingScanner,
+                onBarcodeCaptured: { image, barcode in
+                    print("SupplementsView: Barcode image captured, barcode: \(barcode ?? "none")")
+                    
+                    // Store barcode image for analysis
+                    capturedImage = image
+                    
+                    // Generate hash for image
+                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                        currentImageHash = FoodCacheManager.hashImage(imageData)
+                    }
+                    
+                    // Start analysis immediately (supplements may not need barcode, but handle it if present)
                     analyzeScannedImage(image, barcode: barcode)
+                },
+                onFrontLabelCaptured: { image in
+                    print("SupplementsView: Front label image captured")
+                    
+                    // For supplements, use front label image if barcode image wasn't captured
+                    if capturedImage == nil {
+                        capturedImage = image
+                        if let imageData = image.jpegData(compressionQuality: 0.8) {
+                            currentImageHash = FoodCacheManager.hashImage(imageData)
+                        }
+                    }
+                    
+                    // Dismiss camera
+                    showingScanner = false
+                    
+                    // Show results sheet after a brief delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showingScanResult = true
+                    }
                 }
-            }
+            )
         }
         .sheet(isPresented: $showingScanResult) {
             if let analysis = scanResultAnalysis {

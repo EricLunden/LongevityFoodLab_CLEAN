@@ -6,12 +6,14 @@ struct SupplementsView: View {
     @State private var showingSideMenu = false
     @State private var showingScanner = false
     @State private var showingScanResult = false
-    @State private var capturedImage: UIImage?
+    @State private var capturedImage: UIImage? // Barcode scan image (for analysis)
+    @State private var frontLabelImage: UIImage? // Front label image (for grid display)
     @State private var scanResultAnalysis: FoodAnalysis?
     @State private var scanResultBestPreparation: String? = nil // Not used for supplements, but required for ScanResultView
     @State private var scanType: ScanType = .supplement
     @State private var needsBackScan = false
-    @State private var currentImageHash: String?
+    @State private var currentImageHash: String? // Hash for barcode image (analysis)
+    @State private var frontLabelImageHash: String? // Hash for front label image (grid)
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     
     var body: some View {
@@ -69,12 +71,22 @@ struct SupplementsView: View {
                 onFrontLabelCaptured: { image in
                     print("SupplementsView: Front label image captured")
                     
-                    // For supplements, use front label image if barcode image wasn't captured
+                    // Store front label image for grid display (separate from barcode image)
+                    frontLabelImage = image
+                    
+                    // Generate hash for front label image
+                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                        frontLabelImageHash = FoodCacheManager.hashImage(imageData)
+                    }
+                    
+                    // If no barcode was captured, use front label for analysis
                     if capturedImage == nil {
                         capturedImage = image
                         if let imageData = image.jpegData(compressionQuality: 0.8) {
                             currentImageHash = FoodCacheManager.hashImage(imageData)
                         }
+                        // Start analysis with front label image
+                        analyzeScannedImage(image, barcode: nil)
                     }
                     
                     // Dismiss camera
@@ -93,20 +105,56 @@ struct SupplementsView: View {
                     scanType: scanType,
                     analysis: analysis,
                     bestPreparation: $scanResultBestPreparation,
-                    image: capturedImage,
+                    image: frontLabelImage ?? capturedImage, // Show front label if available, otherwise barcode image
                     isAnalyzing: false,
                     needsBackScan: needsBackScan,
                     onTrack: {
                         // Track supplement to meal tracker if needed
+                        // Only save if front label image was captured (required for grid display)
+                        if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                            // Store front label image (this is what appears in the grid)
+                            foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
+                            // Cache analysis with front label image hash for grid display
+                            foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                            print("SupplementsView: Saved analysis with front label image to grid")
+                        } else {
+                            print("SupplementsView: Cannot save - front label image not captured yet")
+                        }
                         showingScanResult = false
+                        currentImageHash = nil
+                        frontLabelImageHash = nil
+                        capturedImage = nil
+                        frontLabelImage = nil
                     },
                     onSave: {
-                        // Save supplement analysis
+                        // Save supplement analysis - use front label image for grid display
+                        // Only save if front label image was captured (required for grid display)
+                        if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                            // Store front label image (this is what appears in the grid)
+                            foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
+                            // Cache analysis with front label image hash for grid display
+                            foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                            print("SupplementsView: Saved analysis with front label image to grid")
+                        } else {
+                            print("SupplementsView: Cannot save - front label image not captured yet")
+                        }
                         showingScanResult = false
+                        currentImageHash = nil
+                        frontLabelImageHash = nil
+                        capturedImage = nil
+                        frontLabelImage = nil
                     },
                     onScanAgain: {
                         showingScanResult = false
-                        showingScanner = true
+                        scanResultAnalysis = nil
+                        scanResultBestPreparation = nil
+                        capturedImage = nil
+                        frontLabelImage = nil
+                        currentImageHash = nil
+                        frontLabelImageHash = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingScanner = true
+                        }
                     },
                     onDismiss: {
                         showingScanResult = false
@@ -118,7 +166,7 @@ struct SupplementsView: View {
                     scanType: scanType,
                     analysis: nil,
                     bestPreparation: $scanResultBestPreparation,
-                    image: capturedImage,
+                    image: frontLabelImage ?? capturedImage, // Show front label if available, otherwise barcode image
                     isAnalyzing: true,
                     needsBackScan: false,
                     onTrack: { },

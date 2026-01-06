@@ -123,33 +123,39 @@ class OpenFoodFactsService {
     ) -> String {
         // Priority order: imported name > English name > product name
         var nameToUse: String?
+        var isImportedName = false
         
         if let imported = productNameEnImported, !imported.isEmpty {
             nameToUse = imported
+            isImportedName = true
         } else if let enName = productNameEn, !enName.isEmpty {
             nameToUse = enName
         } else if let name = productName, !name.isEmpty {
             nameToUse = name
         }
         
-        // Clean the name: remove redundant comma-separated parts
-        if let name = nameToUse {
-            // Split by comma and take the first meaningful part
+        // Handle imported names specially - they often have format "Brand, product name"
+        if let name = nameToUse, isImportedName {
             let parts = name.components(separatedBy: ",")
-            var cleanedName = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? name
-            
-            // Remove duplicate words within the name itself
-            cleanedName = removeDuplicateWords(from: cleanedName)
-            nameToUse = cleanedName
+            if parts.count > 1 {
+                // Combine all parts (brand + product name) and clean
+                let combined = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.joined(separator: " ")
+                nameToUse = removeDuplicateWords(from: combined)
+            } else {
+                // Single part, just clean it
+                nameToUse = removeDuplicateWords(from: name)
+            }
+        } else if let name = nameToUse {
+            // For non-imported names, clean normally
+            nameToUse = removeDuplicateWords(from: name)
         }
         
-        // Combine with brand if available
+        // Combine with brand if available and not already included
         if let brand = brand, !brand.isEmpty, let name = nameToUse {
             let brandLower = brand.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             let nameLower = name.lowercased()
             
             // Check if brand (or significant parts of it) is already in the name
-            // Split brand into words and check if any significant word is in the name
             let brandWords = brandLower.components(separatedBy: .whitespaces).filter { $0.count > 2 }
             let brandAlreadyInName = brandWords.contains { nameLower.contains($0) } || nameLower.contains(brandLower)
             
@@ -158,8 +164,8 @@ class OpenFoodFactsService {
                 let combined = "\(brand) \(name)"
                 return removeDuplicateWords(from: combined)
             } else {
-                // Brand already in name, just clean it
-                return removeDuplicateWords(from: name)
+                // Brand already in name, just return cleaned name
+                return name
             }
         } else if let name = nameToUse {
             return name

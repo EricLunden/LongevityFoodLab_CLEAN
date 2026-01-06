@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var currentImageHash: String? // Hash for barcode image (analysis)
     @State private var frontLabelImageHash: String? // Hash for front label image (grid)
     @State private var detectedBarcode: String?
+    @State private var currentOpenFoodFactsProduct: OpenFoodFactsProduct? // Store OpenFoodFacts product for OCR
     
     var body: some View {
         TabView(selection: $currentTab) {
@@ -245,6 +246,10 @@ struct ContentView: View {
                         frontLabelImageHash = FoodCacheManager.hashImage(imageData)
                     }
                     
+                    // Extract product name from front label using OCR
+                    // This will update the analysis if a better name is found
+                    extractProductNameFromFrontLabel(image: image)
+                    
                     // Dismiss camera
                     showingScanner = false
                     
@@ -265,17 +270,15 @@ struct ContentView: View {
                 needsBackScan: needsBackScan,
                 onTrack: {
                     // Track food/meal - add to Meal Tracker immediately
-                    if let analysis = scanResultAnalysis {
-                        // Use front label image for grid display if available, otherwise use barcode image
-                        let displayImage = frontLabelImage ?? capturedImage
-                        let displayImageHash = frontLabelImageHash ?? currentImageHash
-                        
-                        if let image = displayImage, let imageHash = displayImageHash {
-                            // Store image first
-                            foodCacheManager.saveImage(image, forHash: imageHash)
-                            // Then cache analysis with front label image hash for grid display
-                            foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil)
-                        }
+                    // Only save if front label image was captured (required for grid display)
+                    if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                        // Store front label image (this is what appears in the grid)
+                        foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
+                        // Cache analysis with front label image hash for grid display
+                        foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                        print("ContentView: Saved analysis with front label image to grid")
+                    } else {
+                        print("ContentView: Cannot save - front label image not captured yet")
                     }
                     showingScanResult = false
                     currentImageHash = nil
@@ -286,17 +289,15 @@ struct ContentView: View {
                 },
                 onSave: {
                     // Save product/supplement - save to Recently Analyzed
-                    if let analysis = scanResultAnalysis {
-                        // Use front label image for grid display if available, otherwise use barcode image
-                        let displayImage = frontLabelImage ?? capturedImage
-                        let displayImageHash = frontLabelImageHash ?? currentImageHash
-                        
-                        if let image = displayImage, let imageHash = displayImageHash {
-                            // Store image first
-                            foodCacheManager.saveImage(image, forHash: imageHash)
-                            // Then cache analysis with front label image hash for grid display
-                            foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanType.rawValue, inputMethod: nil)
-                        }
+                    // Only save if front label image was captured (required for grid display)
+                    if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                        // Store front label image (this is what appears in the grid)
+                        foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
+                        // Cache analysis with front label image hash for grid display
+                        foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                        print("ContentView: Saved analysis with front label image to grid")
+                    } else {
+                        print("ContentView: Cannot save - front label image not captured yet")
                     }
                     showingScanResult = false
                     currentImageHash = nil
@@ -312,7 +313,7 @@ struct ContentView: View {
                     frontLabelImage = nil
                     currentImageHash = nil
                     frontLabelImageHash = nil
-                    currentImageHash = nil
+                    currentOpenFoodFactsProduct = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         showingScanner = true
                     }
@@ -425,21 +426,21 @@ struct ContentView: View {
             return
         }
         
-        // Generate image hash for caching
+        // Generate image hash for caching (barcode image - used for analysis only, not saved to grid)
         let imageHash = FoodCacheManager.hashImage(imageData)
         currentImageHash = imageHash
         print("Scanner: Image hash: \(imageHash)")
         
-        // Pre-save image to disk cache immediately (before API call)
-        foodCacheManager.saveImage(image, forHash: imageHash)
-        
-        // Check cache first
+        // Check cache first (using barcode image hash for lookup)
         if let cachedAnalysis = foodCacheManager.getCachedAnalysis(forImageHash: imageHash) {
             print("Scanner: Found cached analysis, score: \(cachedAnalysis.overallScore)")
             scanResultAnalysis = cachedAnalysis
             determineScanTypeAndBackScanNeeded(analysis: cachedAnalysis)
             return
         }
+        
+        // Note: We do NOT save the barcode image here - it's only used for analysis
+        // The front label image will be saved when user taps Save/Track
         
         // TIERED BACKUP SYSTEM (Phase 3)
         // Tier 1: OpenFoodFacts API (if barcode available)
@@ -452,6 +453,11 @@ struct ContentView: View {
                 do {
                     // Tier 1: Try OpenFoodFacts API
                     if let product = try await OpenFoodFactsService.shared.getProduct(barcode: barcode) {
+                        // Store OpenFoodFacts product for OCR name extraction
+                        await MainActor.run {
+                            self.currentOpenFoodFactsProduct = product
+                        }
+                        
                         // Check if product has meaningful nutrition data before using it
                         if OpenFoodFactsService.shared.hasMeaningfulNutritionData(product) {
                             print("Scanner: Tier 1 SUCCESS - Product found in OpenFoodFacts with nutrition data, sending to AI Vision for scoring")
@@ -508,9 +514,8 @@ struct ContentView: View {
                 scanResultAnalysis = analysis
                 determineScanTypeAndBackScanNeeded(analysis: analysis)
                 
-                // Cache the analysis with image hash and scanType
-                let scanTypeString = analysis.scanType ?? scanType.rawValue
-                foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanTypeString, inputMethod: nil)
+                // Note: Do NOT cache analysis here - wait for front label image to be captured
+                // Analysis will be cached when user taps Save/Track with front label image hash
             }
         } catch {
             print("Scanner: Tier 2 - Analysis failed: \(error.localizedDescription)")
@@ -1136,33 +1141,39 @@ struct ContentView: View {
     ) -> String {
         // Priority order: imported name > English name > product name
         var nameToUse: String?
+        var isImportedName = false
         
         if let imported = productNameEnImported, !imported.isEmpty {
             nameToUse = imported
+            isImportedName = true
         } else if let enName = productNameEn, !enName.isEmpty {
             nameToUse = enName
         } else if let name = productName, !name.isEmpty {
             nameToUse = name
         }
         
-        // Clean the name: remove redundant comma-separated parts
-        if let name = nameToUse {
-            // Split by comma and take the first meaningful part
+        // Handle imported names specially - they often have format "Brand, product name"
+        if let name = nameToUse, isImportedName {
             let parts = name.components(separatedBy: ",")
-            var cleanedName = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? name
-            
-            // Remove duplicate words within the name itself
-            cleanedName = removeDuplicateWords(from: cleanedName)
-            nameToUse = cleanedName
+            if parts.count > 1 {
+                // Combine all parts (brand + product name) and clean
+                let combined = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.joined(separator: " ")
+                nameToUse = removeDuplicateWords(from: combined)
+            } else {
+                // Single part, just clean it
+                nameToUse = removeDuplicateWords(from: name)
+            }
+        } else if let name = nameToUse {
+            // For non-imported names, clean normally
+            nameToUse = removeDuplicateWords(from: name)
         }
         
-        // Combine with brand if available
+        // Combine with brand if available and not already included
         if let brand = brand, !brand.isEmpty, let name = nameToUse {
             let brandLower = brand.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             let nameLower = name.lowercased()
             
             // Check if brand (or significant parts of it) is already in the name
-            // Split brand into words and check if any significant word is in the name
             let brandWords = brandLower.components(separatedBy: .whitespaces).filter { $0.count > 2 }
             let brandAlreadyInName = brandWords.contains { nameLower.contains($0) } || nameLower.contains(brandLower)
             
@@ -1171,8 +1182,8 @@ struct ContentView: View {
                 let combined = "\(brand) \(name)"
                 return removeDuplicateWords(from: combined)
             } else {
-                // Brand already in name, just clean it
-                return removeDuplicateWords(from: name)
+                // Brand already in name, just return cleaned name
+                return name
             }
         } else if let name = nameToUse {
             return name
@@ -1204,6 +1215,53 @@ struct ContentView: View {
         }
         
         return result.joined(separator: " ")
+    }
+    
+    /// Extract product name from front label image using OCR and update analysis if better name found
+    private func extractProductNameFromFrontLabel(image: UIImage) {
+        // Get brand from OpenFoodFacts if available (helps OCR identify product name)
+        let brand = currentOpenFoodFactsProduct?.brands
+        
+        ProductNameOCRService.shared.extractProductName(from: image, brand: brand) { ocrProductName in
+            guard let ocrName = ocrProductName, !ocrName.isEmpty else {
+                print("ContentView: OCR did not extract product name, keeping existing name")
+                return
+            }
+            
+            // Update analysis with OCR-extracted name if it's better
+            // Note: Using MainActor to ensure thread-safe access to @State properties
+            Task { @MainActor in
+                guard let currentAnalysis = self.scanResultAnalysis else { return }
+                // OCR name is better if it's longer/more descriptive than current name
+                let currentName = currentAnalysis.foodName
+                if ocrName.count > currentName.count || 
+                   (ocrName.lowercased().contains("total") && !currentName.lowercased().contains("total")) ||
+                   (ocrName.lowercased().contains("%") && !currentName.lowercased().contains("%")) {
+                    
+                print("ContentView: Updating product name from '\(currentName)' to OCR-extracted '\(ocrName)'")
+                
+                // Create updated analysis with OCR name
+                let updatedAnalysis = FoodAnalysis(
+                    foodName: ocrName,
+                    overallScore: currentAnalysis.overallScore,
+                    summary: currentAnalysis.summary,
+                    healthScores: currentAnalysis.healthScores,
+                    keyBenefits: currentAnalysis.keyBenefits ?? [],
+                    ingredients: currentAnalysis.ingredients ?? [],
+                    bestPreparation: currentAnalysis.bestPreparation ?? "",
+                    servingSize: currentAnalysis.servingSize,
+                    nutritionInfo: currentAnalysis.nutritionInfo,
+                    scanType: currentAnalysis.scanType,
+                    foodNames: currentAnalysis.foodNames,
+                    suggestions: currentAnalysis.suggestions
+                )
+                
+                self.scanResultAnalysis = updatedAnalysis
+            } else {
+                print("ContentView: OCR name '\(ocrName)' not better than current '\(currentName)', keeping current")
+            }
+            }
+        }
     }
     
     private func determineScanTypeAndBackScanNeeded(analysis: FoodAnalysis) {

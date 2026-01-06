@@ -18,7 +18,7 @@ struct GroceryScanGridCard: View {
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     @State private var cachedImage: UIImage?
     
-    init(entry: FoodCacheEntry, isEditing: Bool, isSelected: Bool, onTap: @escaping () -> Void, onToggleSelection: @escaping () -> Void, scoreCircleSize: CGFloat = 28) {
+    init(entry: FoodCacheEntry, isEditing: Bool, isSelected: Bool, onTap: @escaping () -> Void, onToggleSelection: @escaping () -> Void, scoreCircleSize: CGFloat = 40) {
         self.entry = entry
         self.isEditing = isEditing
         self.isSelected = isSelected
@@ -98,7 +98,7 @@ struct GroceryScanGridCard: View {
                             .frame(width: scoreCircleSize, height: scoreCircleSize)
                             .overlay(
                                 Text("\(entry.fullAnalysis.overallScore)")
-                                    .font(.system(size: scoreCircleSize == 56 ? 20 : 12, weight: .bold))
+                                    .font(.system(size: scoreCircleSize == 56 ? 20 : scoreCircleSize == 40 ? 18 : 12, weight: .bold))
                                     .foregroundColor(.white)
                             )
                             .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)

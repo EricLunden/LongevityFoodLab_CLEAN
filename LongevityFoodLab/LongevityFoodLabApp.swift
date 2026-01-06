@@ -242,6 +242,7 @@ struct LongevityFoodLabApp: App {
         // TODO: Replace placeholders with your actual API keys, run app once, then remove this code
         // Keys are now stored in Keychain - this code is commented out for security
         // APIKeyConfiguration.shared.configureKeys(
+        //     openAI: "sk-proj-...",
         //     youtube: "AIzaSyAHRWvcN2V3p76ifu2tDs7FPY72MNcrHRM",
         //     rapidAPI: "9b8395d37bmsh45ab7b891531865p17d2c3jsn4336eb5fb006"
         // )

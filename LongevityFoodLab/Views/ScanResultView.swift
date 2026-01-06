@@ -301,66 +301,67 @@ struct ScanResultView: View {
                         // Back scan prompt
                         backScanPrompt
                     } else if let analysis = analysis {
-                        if scanType == .supplement || scanType == .supplement_facts {
-                            // For supplements: Summary
-                            supplementSummary(analysis: analysis)
-                        } else {
-                            // For ALL grocery items (products, foods, meals, etc.): Product format with summary + bullets + Healthier Choices
-                            // This ensures consistent display for all items scanned from grocery scanner
-                            VStack(spacing: 16) {
-                                // Summary Section - renders immediately (text is already in analysis.summary)
-                                if !analysis.summary.isEmpty {
+                        // For ALL scan types (groceries AND supplements): Summary + Health Goals + Healthier Choices
+                        // This ensures consistent display architecture across all scan types
+                        VStack(spacing: 16) {
+                            // Summary Section - renders immediately (text is already in analysis.summary)
+                            if !analysis.summary.isEmpty {
+                                if scanType == .supplement || scanType == .supplement_facts {
+                                    // For supplements: Use supplementSummary format
+                                    supplementSummary(analysis: analysis)
+                                } else {
+                                    // For groceries: Use summarySection format
                                     summarySection(analysis: analysis)
                                 }
+                            }
+                            
+                            // Combined Health Goals + Healthier Choices (ALWAYS RENDERS because Health Goals has content)
+                            VStack(spacing: 16) {
+                                // Health Goals Section (always renders - has content)
+                                healthGoalsSection(analysis: analysis)
                                 
-                                // Combined Health Goals + Healthier Choices (ALWAYS RENDERS because Health Goals has content)
-                                VStack(spacing: 16) {
-                                    // Health Goals Section (always renders - has content)
-                                    healthGoalsSection(analysis: analysis)
-                                    
-                                    // Healthier Choices Section (part of same VStack, so modifiers always fire)
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        if isLoadingSuggestions {
-                                            VStack(spacing: 8) {
-                                                ProgressView()
-                                                    .scaleEffect(0.8)
-                                                Text("Finding healthier alternatives...")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            .padding(.vertical, 12)
-                                            .frame(maxWidth: .infinity)
-                                        } else if !grocerySuggestions.isEmpty {
-                                            Text("Healthier Choices:")
-                                                .font(.headline)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(.primary)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                .multilineTextAlignment(.leading)
-                                            
-                                            VStack(spacing: 12) {
-                                                ForEach(grocerySuggestions, id: \.productName) { suggestion in
-                                                    suggestionCard(suggestion)
-                                                }
+                                // Healthier Choices Section (part of same VStack, so modifiers always fire)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if isLoadingSuggestions {
+                                        VStack(spacing: 8) {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                            Text("Finding healthier alternatives...")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(.vertical, 12)
+                                        .frame(maxWidth: .infinity)
+                                    } else if !grocerySuggestions.isEmpty {
+                                        Text("Healthier Choices:")
+                                            .font(.headline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .multilineTextAlignment(.leading)
+                                        
+                                        VStack(spacing: 12) {
+                                            ForEach(grocerySuggestions, id: \.productName) { suggestion in
+                                                suggestionCard(suggestion)
                                             }
                                         }
-                                        // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
                                     }
+                                    // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
                                 }
-                                .onAppear {
-                                    print("🔍 Combined VStack onAppear - scheduling async load for healthier choices")
-                                    // Delay loading to ensure Summary and Health Goals render first
-                                    Task { @MainActor in
-                                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
-                                        loadHealthierChoicesIfNeeded(for: analysis)
-                                    }
+                            }
+                            .onAppear {
+                                print("🔍 Combined VStack onAppear - scheduling async load for healthier choices")
+                                // Delay loading to ensure Summary and Health Goals render first
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second delay
+                                    loadHealthierChoicesIfNeeded(for: analysis)
                                 }
-                                .onChange(of: bestPreparation) { oldValue, newValue in
-                                    print("🔍 bestPreparation changed from '\(oldValue ?? "nil")' to '\(newValue ?? "nil")'")
-                                    // Only use bestPreparation if we don't already have API suggestions
-                                    if grocerySuggestions.isEmpty, let newValue = newValue, !newValue.isEmpty {
-                                        convertBestPreparationToSuggestion(newValue, analysisScore: analysis.overallScore)
-                                    }
+                            }
+                            .onChange(of: bestPreparation) { oldValue, newValue in
+                                print("🔍 bestPreparation changed from '\(oldValue ?? "nil")' to '\(newValue ?? "nil")'")
+                                // Only use bestPreparation if we don't already have API suggestions
+                                if grocerySuggestions.isEmpty, let newValue = newValue, !newValue.isEmpty {
+                                    convertBestPreparationToSuggestion(newValue, analysisScore: analysis.overallScore)
                                 }
                             }
                         }
@@ -819,32 +820,68 @@ struct ScanResultView: View {
     
     private func loadSuggestionsFromAPI(for analysis: FoodAnalysis) {
         isLoadingSuggestions = true
-        let nutritionInfo = analysis.nutritionInfoOrDefault
         
-        AIService.shared.findSimilarGroceryProducts(
-            currentProduct: analysis.foodName,
-            currentScore: analysis.overallScore,
-            nutritionInfo: nutritionInfo
-        ) { result in
-            DispatchQueue.main.async {
-                self.isLoadingSuggestions = false
-                
-                switch result {
-                case .success(let apiSuggestions):
-                    // Remove duplicates and limit to 2 suggestions
-                    let uniqueSuggestions = self.removeDuplicates(apiSuggestions)
-                    self.grocerySuggestions = Array(uniqueSuggestions.prefix(2))
-                    print("🔍 Loaded \(self.grocerySuggestions.count) suggestions from API")
+        // Check scan type to call the appropriate API
+        let isSupplement = scanType == .supplement || scanType == .supplement_facts
+        
+        if isSupplement {
+            // Use supplement-specific API
+            AIService.shared.findSimilarSupplements(
+                currentSupplement: analysis.foodName,
+                currentScore: analysis.overallScore
+            ) { result in
+                DispatchQueue.main.async {
+                    self.isLoadingSuggestions = false
                     
-                    // Save to cache
-                    self.saveSuggestionsToCache(self.grocerySuggestions, for: analysis)
-                case .failure(let error):
-                    print("🔍 API failed: \(error.localizedDescription), falling back to bestPreparation")
-                    // Fallback to bestPreparation if API fails
-                    if let bestPrep = self.bestPreparation, !bestPrep.isEmpty {
-                        self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
-                    } else if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
-                        self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                    switch result {
+                    case .success(let apiSuggestions):
+                        // Remove duplicates and limit to 2 suggestions
+                        let uniqueSuggestions = self.removeDuplicates(apiSuggestions)
+                        self.grocerySuggestions = Array(uniqueSuggestions.prefix(2))
+                        print("🔍 Loaded \(self.grocerySuggestions.count) supplement suggestions from API")
+                        
+                        // Save to cache
+                        self.saveSuggestionsToCache(self.grocerySuggestions, for: analysis)
+                    case .failure(let error):
+                        print("🔍 Supplement API failed: \(error.localizedDescription), falling back to bestPreparation")
+                        // Fallback to bestPreparation if API fails
+                        if let bestPrep = self.bestPreparation, !bestPrep.isEmpty {
+                            self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                        } else if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
+                            self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                        }
+                    }
+                }
+            }
+        } else {
+            // Use grocery-specific API
+            let nutritionInfo = analysis.nutritionInfoOrDefault
+            
+            AIService.shared.findSimilarGroceryProducts(
+                currentProduct: analysis.foodName,
+                currentScore: analysis.overallScore,
+                nutritionInfo: nutritionInfo
+            ) { result in
+                DispatchQueue.main.async {
+                    self.isLoadingSuggestions = false
+                    
+                    switch result {
+                    case .success(let apiSuggestions):
+                        // Remove duplicates and limit to 2 suggestions
+                        let uniqueSuggestions = self.removeDuplicates(apiSuggestions)
+                        self.grocerySuggestions = Array(uniqueSuggestions.prefix(2))
+                        print("🔍 Loaded \(self.grocerySuggestions.count) grocery suggestions from API")
+                        
+                        // Save to cache
+                        self.saveSuggestionsToCache(self.grocerySuggestions, for: analysis)
+                    case .failure(let error):
+                        print("🔍 Grocery API failed: \(error.localizedDescription), falling back to bestPreparation")
+                        // Fallback to bestPreparation if API fails
+                        if let bestPrep = self.bestPreparation, !bestPrep.isEmpty {
+                            self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                        } else if let bestPrep = analysis.bestPreparation, !bestPrep.isEmpty {
+                            self.convertBestPreparationToSuggestion(bestPrep, analysisScore: analysis.overallScore)
+                        }
                     }
                 }
             }

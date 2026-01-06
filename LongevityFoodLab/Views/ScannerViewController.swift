@@ -175,33 +175,32 @@ class ScannerVC: UIViewController {
         // Button container - bottom of screen, horizontal layout
         let container = UIView()
         container.backgroundColor = .clear
+        container.clipsToBounds = false // Allow buttons to be positioned outside bounds if needed
         view.addSubview(container)
         self.buttonContainer = container
-        
-        // Cancel button - styled like secondary buttons in app
-        let cancelButton = UIButton(type: .system)
-        cancelButton.setTitle("Cancel", for: .normal)
-        cancelButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold) // .headline equivalent
-        cancelButton.setTitleColor(UIColor.secondaryLabel, for: .normal)
-        cancelButton.backgroundColor = UIColor.systemGray6
-        cancelButton.layer.cornerRadius = 12
-        cancelButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
-        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
-        container.addSubview(cancelButton)
-        self.cancelButton = cancelButton
         
         // Capture button - initially hidden, shown when front label capture is needed
         let captureButton = UIButton(type: .system)
         captureButton.setTitle("Capture Label", for: .normal)
         captureButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
         captureButton.setTitleColor(.white, for: .normal)
-        captureButton.backgroundColor = UIColor(red: 0.42, green: 0.557, blue: 0.498, alpha: 1.0)
         captureButton.layer.cornerRadius = 12
         captureButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         captureButton.addTarget(self, action: #selector(captureTapped), for: .touchUpInside)
         captureButton.isHidden = true // Hidden initially, shown when barcode is detected
         container.addSubview(captureButton)
         self.captureButton = captureButton
+        
+        // Cancel button - same size as Capture button, placed below it
+        let cancelButton = UIButton(type: .system)
+        cancelButton.setTitle("Cancel", for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        cancelButton.setTitleColor(.white, for: .normal)
+        cancelButton.layer.cornerRadius = 12
+        cancelButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
+        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        container.addSubview(cancelButton)
+        self.cancelButton = cancelButton
         
         // Scanning overlay with corner brackets
         let overlay = UIView()
@@ -210,9 +209,9 @@ class ScannerVC: UIViewController {
         view.addSubview(overlay)
         self.scanningOverlay = overlay
         
-        // Prompt label for front label capture
+        // Prompt label for front label capture - moved to top
         let promptLabel = UILabel()
-        promptLabel.text = "Take a photo of the front label for reference"
+        promptLabel.text = "Take A Photo Of The Front Label For Reference"
         promptLabel.font = .systemFont(ofSize: 17, weight: .medium)
         promptLabel.textColor = .white
         promptLabel.textAlignment = .center
@@ -240,75 +239,124 @@ class ScannerVC: UIViewController {
         let buttonSpacing: CGFloat = 12
         let bottomPadding: CGFloat = 40
         
-        let containerY = view.bounds.height - buttonHeight - bottomPadding
-        buttonContainer?.frame = CGRect(
-            x: buttonPadding,
-            y: containerY,
-            width: view.bounds.width - (buttonPadding * 2),
-            height: buttonHeight
-        )
-        
-        // Calculate button widths (equal width, sharing space)
+        // Calculate container width
         let containerWidth = view.bounds.width - (buttonPadding * 2)
-        let totalSpacing = buttonSpacing
-        let buttonWidth = (containerWidth - totalSpacing) / 2
-        
-        // Cancel button (left)
-        cancelButton?.frame = CGRect(
-            x: 0,
-            y: 0,
-            width: buttonWidth,
-            height: buttonHeight
-        )
         
         // Capture button layout based on state
         if currentState == .capturingFrontLabel {
-            // Full width capture button at bottom, cancel button above it
-            captureButton?.frame = CGRect(
-                x: 0,
-                y: 0,
+            // Stacked layout: Capture button at top, Cancel button below it
+            let totalHeight = (buttonHeight * 2) + buttonSpacing
+            let containerY = view.bounds.height - totalHeight - bottomPadding
+            
+            buttonContainer?.frame = CGRect(
+                x: buttonPadding,
+                y: containerY,
+                width: containerWidth,
+                height: totalHeight
+            )
+            
+            // Capture button at top (full width)
+            if let captureButton = captureButton {
+                captureButton.frame = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: containerWidth,
+                    height: buttonHeight
+                )
+            }
+            
+            // Cancel button below capture button (same size, full width)
+            if let cancelButton = cancelButton {
+                cancelButton.isHidden = false
+                cancelButton.frame = CGRect(
+                    x: 0,
+                    y: buttonHeight + buttonSpacing,
+                    width: containerWidth,
+                    height: buttonHeight
+                )
+            }
+        } else {
+            // Normal layout: single button container
+            let containerY = view.bounds.height - buttonHeight - bottomPadding
+            buttonContainer?.frame = CGRect(
+                x: buttonPadding,
+                y: containerY,
                 width: containerWidth,
                 height: buttonHeight
             )
-            // Position cancel button above capture button
-            cancelButton?.isHidden = false
-            cancelButton?.frame = CGRect(
-                x: buttonPadding,
-                y: -buttonHeight - 8,
-                width: 100,
-                height: 40
-            )
-        } else {
-            // Normal layout: cancel and capture buttons side by side
-            cancelButton?.frame = CGRect(
-                x: 0,
-                y: 0,
-                width: buttonWidth,
-                height: buttonHeight
-            )
-            captureButton?.frame = CGRect(
-                x: buttonWidth + buttonSpacing,
-                y: 0,
-                width: buttonWidth,
-                height: buttonHeight
-            )
+            
+            // Cancel button only (full width)
+            if let cancelButton = cancelButton {
+                cancelButton.frame = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: containerWidth,
+                    height: buttonHeight
+                )
+            }
+        }
+        
+        // Apply gradients/styles after frames are set
+        if let captureButton = captureButton, !captureButton.isHidden {
+            applyGreenGradient(to: captureButton)
+        }
+        if let cancelButton = cancelButton, !cancelButton.isHidden {
+            applyDarkGrayBackground(to: cancelButton)
         }
         
         // Update scanning overlay
         updateScanningOverlay()
         
-        // Update prompt label position
+        // Update prompt label position - moved to top
         if let promptLabel = promptLabel {
             let promptWidth = view.bounds.width - 40
-            let promptHeight: CGFloat = 60
+            let promptHeight: CGFloat = 50
+            let topPadding: CGFloat = 60 // Safe area + padding
             promptLabel.frame = CGRect(
                 x: 20,
-                y: view.bounds.height / 2 - promptHeight / 2,
+                y: topPadding,
                 width: promptWidth,
                 height: promptHeight
             )
             promptLabel.layer.masksToBounds = true
         }
+    }
+    
+    // MARK: - Button Gradient Helpers
+    
+    private func applyGreenGradient(to button: UIButton) {
+        // Remove existing gradient layers
+        button.layer.sublayers?.forEach { layer in
+            if layer is CAGradientLayer {
+                layer.removeFromSuperlayer()
+            }
+        }
+        
+        // Create green gradient (same as View More button)
+        let gradient = CAGradientLayer()
+        gradient.frame = button.bounds
+        gradient.cornerRadius = 12
+        gradient.colors = [
+            UIColor(red: 29/255.0, green: 139/255.0, blue: 31/255.0, alpha: 1.0).cgColor,  // Green #1D8B1F
+            UIColor(red: 159/255.0, green: 169/255.0, blue: 13/255.0, alpha: 1.0).cgColor  // Yellow-green #9FA90D
+        ]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        
+        // Insert gradient below button's title label
+        button.layer.insertSublayer(gradient, at: 0)
+    }
+    
+    private func applyDarkGrayBackground(to button: UIButton) {
+        // Remove existing gradient layers
+        button.layer.sublayers?.forEach { layer in
+            if layer is CAGradientLayer {
+                layer.removeFromSuperlayer()
+            }
+        }
+        
+        // Set dark gray background color
+        button.backgroundColor = UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
     }
     
     private func updateScanningOverlay() {
@@ -320,7 +368,7 @@ class ScannerVC: UIViewController {
         overlay.layer.sublayers?.forEach { $0.removeFromSuperlayer() }
         
         if currentState == .scanningBarcode {
-            // Draw corner brackets
+            // Draw corner brackets for barcode scanning
             let bracketLength: CGFloat = 30
             let bracketWidth: CGFloat = 4
             let margin: CGFloat = 50
@@ -375,6 +423,53 @@ class ScannerVC: UIViewController {
             scanningLine.add(animation, forKey: "scanning")
             
             overlay.layer.addSublayer(scanningLine)
+        } else if currentState == .capturingFrontLabel {
+            // Draw corner frame markers for front label capture
+            let bracketLength: CGFloat = 40
+            let bracketWidth: CGFloat = 4
+            let margin: CGFloat = 40
+            
+            // Center the frame in the view
+            let frameWidth = view.bounds.width - (margin * 2)
+            let frameHeight = frameWidth * 0.75 // 4:3 aspect ratio
+            let frameX = margin
+            let frameY = (view.bounds.height - frameHeight) / 2
+            
+            let frameRect = CGRect(
+                x: frameX,
+                y: frameY,
+                width: frameWidth,
+                height: frameHeight
+            )
+            
+            let path = UIBezierPath()
+            
+            // Top-left corner
+            path.move(to: CGPoint(x: frameRect.minX, y: frameRect.minY + bracketLength))
+            path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.minY))
+            path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.minY))
+            
+            // Top-right corner
+            path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.minY))
+            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY))
+            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY + bracketLength))
+            
+            // Bottom-left corner
+            path.move(to: CGPoint(x: frameRect.minX, y: frameRect.maxY - bracketLength))
+            path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.maxY))
+            path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.maxY))
+            
+            // Bottom-right corner
+            path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.maxY))
+            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY))
+            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY - bracketLength))
+            
+            let shapeLayer = CAShapeLayer()
+            shapeLayer.path = path.cgPath
+            shapeLayer.strokeColor = UIColor.white.cgColor
+            shapeLayer.lineWidth = bracketWidth
+            shapeLayer.fillColor = UIColor.clear.cgColor
+            overlay.layer.addSublayer(shapeLayer)
         }
     }
     
@@ -459,7 +554,8 @@ class ScannerVC: UIViewController {
                 self.captureButton?.isEnabled = true
                 self.promptLabel?.isHidden = false
                 self.cancelButton?.isHidden = false
-                // Update layout to show full-width capture button
+                self.cancelButton?.isEnabled = true
+                // Update layout to show stacked buttons
                 self.viewDidLayoutSubviews()
                 // Ensure button container and buttons are on top and visible
                 if let container = self.buttonContainer {

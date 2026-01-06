@@ -415,20 +415,10 @@ struct ContentView: View {
                     if let product = try await OpenFoodFactsService.shared.getProduct(barcode: barcode) {
                         // Check if product has meaningful nutrition data before using it
                         if OpenFoodFactsService.shared.hasMeaningfulNutritionData(product) {
-                            print("Scanner: Tier 1 SUCCESS - Product found in OpenFoodFacts with nutrition data")
+                            print("Scanner: Tier 1 SUCCESS - Product found in OpenFoodFacts with nutrition data, sending to AI Vision for scoring")
                             
-                            // Map to FoodAnalysis
-                            let analysis = OpenFoodFactsService.shared.mapToFoodAnalysis(product)
-                            
-                            await MainActor.run {
-                                print("Scanner: OpenFoodFacts analysis received, score: \(analysis.overallScore)")
-                                scanResultAnalysis = analysis
-                                determineScanTypeAndBackScanNeeded(analysis: analysis)
-                                
-                                // Cache the analysis with image hash and scanType
-                                let scanTypeString = analysis.scanType ?? scanType.rawValue
-                                foodCacheManager.cacheAnalysis(analysis, imageHash: imageHash, scanType: scanTypeString, inputMethod: nil)
-                            }
+                            // Use AI Vision for scoring, but pass OpenFoodFacts data for authoritative nutrition facts
+                            await performTier2Analysis(image: image, imageHash: imageHash, openFoodFactsProduct: product)
                             return // Success - exit early
                         } else {
                             print("Scanner: Tier 1 - Product found but missing nutrition data, falling back to Tier 2")
@@ -443,22 +433,22 @@ struct ContentView: View {
                     // Fall through to Tier 2
                 }
                 
-                // Tier 2: Fallback to AI Vision API
-                await performTier2Analysis(image: image, imageHash: imageHash)
+                // Tier 2: Fallback to AI Vision API (no OpenFoodFacts data)
+                await performTier2Analysis(image: image, imageHash: imageHash, openFoodFactsProduct: nil)
             }
         } else {
             print("Scanner: No barcode detected, using Tier 2: AI Vision API")
             
             // Tier 2: AI Vision API (no barcode available)
             Task {
-                await performTier2Analysis(image: image, imageHash: imageHash)
+                await performTier2Analysis(image: image, imageHash: imageHash, openFoodFactsProduct: nil)
             }
         }
     }
     
     // MARK: - Tier 2: AI Vision API Fallback
     
-    private func performTier2Analysis(image: UIImage, imageHash: String) async {
+    private func performTier2Analysis(image: UIImage, imageHash: String, openFoodFactsProduct: OpenFoodFactsProduct?) async {
         // Optimize image (resize + compress) for faster API uploads
         guard let imageData = image.optimizedForAPI() else {
             print("Scanner: Failed to optimize image")
@@ -469,10 +459,10 @@ struct ContentView: View {
         }
         
         let base64Image = imageData.base64EncodedString()
-        print("Scanner: Tier 2 - Calling OpenAI Vision API")
+        print("Scanner: Tier 2 - Calling OpenAI Vision API\(openFoodFactsProduct != nil ? " with OpenFoodFacts data" : "")")
         
         do {
-            let analysis = try await analyzeImageWithOpenAI(base64Image: base64Image, imageHash: imageHash)
+            let analysis = try await analyzeImageWithOpenAI(base64Image: base64Image, imageHash: imageHash, openFoodFactsProduct: openFoodFactsProduct)
             
             await MainActor.run {
                 print("Scanner: Tier 2 - Analysis received, score: \(analysis.overallScore)")
@@ -491,7 +481,7 @@ struct ContentView: View {
         }
     }
     
-    private func analyzeImageWithOpenAI(base64Image: String, imageHash: String) async throws -> FoodAnalysis {
+    private func analyzeImageWithOpenAI(base64Image: String, imageHash: String, openFoodFactsProduct: OpenFoodFactsProduct?) async throws -> FoodAnalysis {
         guard let url = URL(string: SecureConfig.openAIBaseURL) else {
             throw NSError(domain: "Invalid URL", code: 0, userInfo: nil)
         }
@@ -518,9 +508,71 @@ struct ContentView: View {
         default: mealTiming = "meal"
         }
         
+        // Build OpenFoodFacts data section if available
+        var openFoodFactsSection = ""
+        if let product = openFoodFactsProduct {
+            let productName = product.productNameEnImported ?? product.productNameEn ?? product.productName ?? "Unknown Product"
+            let brand = product.brands ?? ""
+            let ingredients = product.ingredientsText ?? ""
+            let novaGroup = product.novaGroup.map { String($0) } ?? "unknown"
+            
+            // Format nutrition data
+            var nutritionData = ""
+            if let nutriments = product.nutriments {
+                if let calories = nutriments.energyKcalServing ?? nutriments.energyKcal100g {
+                    nutritionData += "Calories: \(Int(calories)) kcal\n"
+                }
+                if let protein = nutriments.proteinsServing ?? nutriments.proteins100g {
+                    nutritionData += "Protein: \(String(format: "%.1f", protein))g\n"
+                }
+                if let carbs = nutriments.carbohydratesServing ?? nutriments.carbohydrates100g {
+                    nutritionData += "Carbohydrates: \(String(format: "%.1f", carbs))g\n"
+                }
+                if let fat = nutriments.fatServing ?? nutriments.fat100g {
+                    nutritionData += "Fat: \(String(format: "%.1f", fat))g\n"
+                }
+                if let sugar = nutriments.sugarsServing ?? nutriments.sugars100g {
+                    nutritionData += "Sugar: \(String(format: "%.1f", sugar))g\n"
+                }
+                if let fiber = nutriments.fiberServing ?? nutriments.fiber100g {
+                    nutritionData += "Fiber: \(String(format: "%.1f", fiber))g\n"
+                }
+                if let sodium = nutriments.sodiumServing ?? nutriments.sodium100g {
+                    let sodiumMg = sodium * 1000
+                    nutritionData += "Sodium: \(Int(sodiumMg))mg\n"
+                }
+            }
+            
+            openFoodFactsSection = """
+            
+            ════════════════════════════════════════════════════════════════════════════
+            AUTHORITATIVE PRODUCT DATA FROM OPENFOODFACTS DATABASE:
+            ════════════════════════════════════════════════════════════════════════════
+            
+            Product Name: \(brand.isEmpty ? productName : "\(brand) \(productName)")
+            NOVA Group (Processing Level): \(novaGroup) (1=unprocessed, 2=minimally processed, 3=processed, 4=ultra-processed)
+            
+            NUTRITION FACTS (per serving or per 100g):
+            \(nutritionData.isEmpty ? "Not available" : nutritionData)
+            
+            INGREDIENTS:
+            \(ingredients.isEmpty ? "Not available" : ingredients)
+            
+            CRITICAL INSTRUCTIONS FOR USING THIS DATA:
+            - Use the nutrition facts above as AUTHORITATIVE - they are from the product database
+            - Use the product name and brand from above (don't guess from image)
+            - Use NOVA group to help determine processing level for scoring
+            - Still analyze the image for visual context, but prioritize the data above
+            - Score based on the complete product information (name, ingredients, nutrition, NOVA group)
+            
+            ════════════════════════════════════════════════════════════════════════════
+            
+            """
+        }
+        
         let prompt = """
         You are a precision nutrition analysis system. Analyze this image and return ONLY valid JSON.
-
+        \(openFoodFactsSection)
         🚫 CRITICAL PROHIBITION - READ THIS FIRST:
         NEVER mention age, gender, or demographics in the summary. Examples of FORBIDDEN phrases:
         - "young male", "young female", "adult", "elderly"
@@ -552,10 +604,16 @@ struct ContentView: View {
         - Example: For a salmon bowl with rice, vegetables, and a lemon wedge → focus on salmon, rice, vegetables. Ignore the lemon wedge unless it's a main component.
         - Only mention garnishes if they significantly impact nutrition (e.g., large amounts of sauce, cheese, etc.)
 
-        Extract nutritional data from the image:
+        Extract nutritional data:
+        \(openFoodFactsProduct != nil ? """
+        - AUTHORITATIVE DATA PROVIDED: Use the nutrition facts from OpenFoodFacts database above (they are accurate and complete)
+        - Still analyze the image for visual context and product appearance
+        - Use the product name and ingredients from OpenFoodFacts data above
+        """ : """
         - For products/supplements: Read ALL values from visible nutrition labels
         - For foods/meals: Estimate based on standard serving sizes of MAIN INGREDIENTS
         - Use exact values from labels when visible, estimates when not
+        """)
 
         STEP 3: Score using these EXACT ranges:
         - Whole foods (apple, salmon, broccoli): 70-95
@@ -798,6 +856,29 @@ struct ContentView: View {
                 foodNames: analysis.foodNames,
                 suggestions: analysis.suggestions
             )
+        }
+        
+        // Merge OpenFoodFacts nutrition data if available (authoritative source)
+        if let product = openFoodFactsProduct, let nutriments = product.nutriments {
+            let nutritionInfo = OpenFoodFactsService.shared.mapNutritionInfo(from: nutriments)
+            let servingSize = product.nutriments?.servingSize ?? analysis.servingSize
+            
+            analysis = FoodAnalysis(
+                foodName: analysis.foodName,
+                overallScore: analysis.overallScore,
+                summary: analysis.summary,
+                healthScores: analysis.healthScores,
+                keyBenefits: analysis.keyBenefits ?? [],
+                ingredients: analysis.ingredients ?? [],
+                bestPreparation: analysis.bestPreparation ?? "",
+                servingSize: servingSize,
+                nutritionInfo: nutritionInfo,
+                scanType: analysis.scanType,
+                foodNames: analysis.foodNames,
+                suggestions: analysis.suggestions
+            )
+            
+            print("Scanner: Merged OpenFoodFacts nutrition data into analysis")
         }
         
         print("Scanner: Decoded analysis - scanType: '\(analysis.scanType ?? "nil")', bestPreparation: '\(analysis.bestPreparation)'")

@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var capturedImage: UIImage? // Barcode scan image (for analysis)
     @State private var frontLabelImage: UIImage? // Front label image (for grid display)
     @State private var scanResultAnalysis: FoodAnalysis?
+    @State private var scanResultBestPreparation: String? = nil
     @State private var scanType: ScanType = .food
     @State private var needsBackScan = false
     @State private var currentImageHash: String? // Hash for barcode image (analysis)
@@ -265,6 +266,7 @@ struct ContentView: View {
             ScanResultView(
                 scanType: scanType,
                 analysis: scanResultAnalysis,
+                bestPreparation: $scanResultBestPreparation,
                 image: frontLabelImage ?? capturedImage, // Show front label if available, otherwise barcode image
                 isAnalyzing: scanResultAnalysis == nil,
                 needsBackScan: needsBackScan,
@@ -309,6 +311,7 @@ struct ContentView: View {
                     // Scan again - reopen camera immediately
                     showingScanResult = false
                     scanResultAnalysis = nil
+                    scanResultBestPreparation = nil
                     capturedImage = nil
                     frontLabelImage = nil
                     currentImageHash = nil
@@ -321,6 +324,7 @@ struct ContentView: View {
                 onDismiss: {
                     showingScanResult = false
                     scanResultAnalysis = nil
+                    scanResultBestPreparation = nil
                     capturedImage = nil
                     currentImageHash = nil
                 }
@@ -413,6 +417,7 @@ struct ContentView: View {
         
         // Reset state
         scanResultAnalysis = nil
+        scanResultBestPreparation = nil
         needsBackScan = false
         scanType = .food
         
@@ -435,6 +440,7 @@ struct ContentView: View {
         if let cachedAnalysis = foodCacheManager.getCachedAnalysis(forImageHash: imageHash) {
             print("Scanner: Found cached analysis, score: \(cachedAnalysis.overallScore)")
             scanResultAnalysis = cachedAnalysis
+            scanResultBestPreparation = cachedAnalysis.bestPreparation
             determineScanTypeAndBackScanNeeded(analysis: cachedAnalysis)
             return
         }
@@ -512,6 +518,7 @@ struct ContentView: View {
             await MainActor.run {
                 print("Scanner: Tier 2 - Analysis received, score: \(analysis.overallScore)")
                 scanResultAnalysis = analysis
+                scanResultBestPreparation = analysis.bestPreparation // May be nil initially, will be set in Step 2
                 determineScanTypeAndBackScanNeeded(analysis: analysis)
                 
                 // Note: Do NOT cache analysis here - wait for front label image to be captured
@@ -979,6 +986,12 @@ struct ContentView: View {
                 )
                 
                 print("Scanner: Updated analysis with new bestPreparation")
+                
+                // Update separate state for binding
+                await MainActor.run {
+                    scanResultBestPreparation = healthierChoice
+                    print("✅ ContentView: Set scanResultBestPreparation to: \(healthierChoice)")
+                }
             } catch {
                 // If Step 2 fails, keep original analysis with "TBD" or empty bestPreparation
                 print("Scanner: Healthier choice generation failed: \(error.localizedDescription)")
@@ -1257,6 +1270,7 @@ struct ContentView: View {
                 )
                 
                 self.scanResultAnalysis = updatedAnalysis
+                self.scanResultBestPreparation = updatedAnalysis.bestPreparation
             } else {
                 print("ContentView: OCR name '\(ocrName)' not better than current '\(currentName)', keeping current")
             }
@@ -1550,7 +1564,12 @@ struct ScannerTabView: View {
             LazyVStack(spacing: 12) {
                 ForEach(scansToDisplay, id: \.cacheKey) { entry in
                     GroceryScanRowView(entry: entry, onTap: { analysis in
-                        selectedAnalysisItem = AnalysisItem(analysis: analysis)
+                        // Use the latest cache entry to ensure we have the most up-to-date suggestions
+                        if let latestEntry = foodCacheManager.cachedAnalyses.first(where: { $0.cacheKey == entry.cacheKey }) {
+                            selectedAnalysisItem = AnalysisItem(analysis: latestEntry.fullAnalysis)
+                        } else {
+                            selectedAnalysisItem = AnalysisItem(analysis: analysis)
+                        }
                     }, onDelete: { cacheKey in
                         foodCacheManager.deleteAnalysis(withCacheKey: cacheKey)
                     })
@@ -1634,7 +1653,12 @@ struct ScannerTabView: View {
                     isEditing: isEditing,
                     isSelected: selectedScanIDs.contains(entry.cacheKey),
                     onTap: {
-                        selectedAnalysisItem = AnalysisItem(analysis: entry.fullAnalysis)
+                        // Use the latest cache entry to ensure we have the most up-to-date suggestions
+                        if let latestEntry = foodCacheManager.cachedAnalyses.first(where: { $0.cacheKey == entry.cacheKey }) {
+                            selectedAnalysisItem = AnalysisItem(analysis: latestEntry.fullAnalysis)
+                        } else {
+                            selectedAnalysisItem = AnalysisItem(analysis: entry.fullAnalysis)
+                        }
                     },
                     onToggleSelection: {
                         if selectedScanIDs.contains(entry.cacheKey) {

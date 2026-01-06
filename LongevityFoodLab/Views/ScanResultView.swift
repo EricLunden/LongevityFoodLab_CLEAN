@@ -19,6 +19,7 @@ enum ScanType: String {
 struct ScanResultView: View {
     let scanType: ScanType
     let analysis: FoodAnalysis?
+    @Binding var bestPreparation: String?
     let image: UIImage?
     let isAnalyzing: Bool
     let needsBackScan: Bool
@@ -31,8 +32,6 @@ struct ScanResultView: View {
     @State private var isAnimating: Bool = false
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var foodCacheManager = FoodCacheManager.shared
-    @State private var grocerySuggestions: [GrocerySuggestion] = []
-    @State private var isLoadingSuggestions = false
     
     var body: some View {
         ZStack {
@@ -304,9 +303,21 @@ struct ScanResultView: View {
                             // For supplements: Summary
                             supplementSummary(analysis: analysis)
                         } else {
-                            // For ALL grocery items (products, foods, meals, etc.): Product format with bullets + Healthier Choices
+                            // For ALL grocery items (products, foods, meals, etc.): Product format with summary + bullets + Healthier Choices
                             // This ensures consistent display for all items scanned from grocery scanner
-                            allHealthGoalsWithBullets(analysis: analysis)
+                            VStack(spacing: 16) {
+                                // Summary Section - renders immediately (text is already in analysis.summary)
+                                if !analysis.summary.isEmpty {
+                                    summarySection(analysis: analysis)
+                                }
+                                
+                                // Health Goals Section - renders immediately (no async dependencies)
+                                healthGoalsSection(analysis: analysis)
+                                
+                                // Healthier Choices Section - loads asynchronously after view appears
+                                // Uses HealthierChoicesContainerView which handles all loading off main thread
+                                HealthierChoicesContainerView(analysis: analysis, bestPreparation: $bestPreparation)
+                            }
                         }
                     } else {
                         // No data
@@ -418,6 +429,23 @@ struct ScanResultView: View {
         .padding(.vertical, 20)
     }
     
+    private func summarySection(analysis: FoodAnalysis) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Summary")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            
+            // Format summary as sentences
+            ForEach(Array(formatSummaryIntoSentences(analysis.summary).enumerated()), id: \.offset) { index, sentence in
+                Text(sentence)
+                    .font(.body)
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    
     private func supplementSummary(analysis: FoodAnalysis) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Summary")
@@ -425,10 +453,8 @@ struct ScanResultView: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
             
-            // Format summary as 3 sentences
-            let sentences = formatSummaryIntoSentences(analysis.summary)
-            
-            ForEach(Array(sentences.enumerated()), id: \.offset) { index, sentence in
+            // Format summary as sentences
+            ForEach(Array(formatSummaryIntoSentences(analysis.summary).enumerated()), id: \.offset) { index, sentence in
                 Text(sentence)
                     .font(.body)
                     .foregroundColor(.primary)
@@ -576,7 +602,7 @@ struct ScanResultView: View {
     private var titleText: String {
         if isAnalyzing {
             return "Scanning"
-        } else if let analysis = analysis {
+        } else if let analysis = analysis, !analysis.foodName.isEmpty {
             return analysis.foodName
         } else if scanType == .product || scanType == .nutrition_label {
             return "Nutrition Facts"
@@ -650,7 +676,8 @@ struct ScanResultView: View {
         }
     }
     
-    private func allHealthGoalsWithBullets(analysis: FoodAnalysis) -> some View {
+    // MARK: - Health Goals Section (renders immediately)
+    private func healthGoalsSection(analysis: FoodAnalysis) -> some View {
         let healthGoals = healthProfileManager.getHealthGoals()
         
         guard !healthGoals.isEmpty else {
@@ -685,75 +712,35 @@ struct ScanResultView: View {
         let bodyWeight = Font.Weight.regular
         
         return AnyView(
-            VStack(spacing: 16) {
-                // Health Goals Section
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Health Goals:")
-                        .font(headerFont)
-                        .fontWeight(headerWeight)
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .multilineTextAlignment(.leading)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(allAssessments.enumerated()), id: \.offset) { index, item in
-                            HStack(alignment: .top, spacing: 8) {
-                                // Icon (checkmark or X) instead of bullet
-                                Text(item.icon)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(item.bulletColor)
-                                    .padding(.top, 2)
-                                
-                                Text(item.text)
-                                    .font(bodyFont)
-                                    .fontWeight(bodyWeight)
-                                    .foregroundColor(.primary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Health Goals:")
+                    .font(headerFont)
+                    .fontWeight(headerWeight)
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
                 
-                // Healthier Choices Section - Using new structure
-                if isLoadingSuggestions {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Finding healthier alternatives...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                } else if !grocerySuggestions.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Healthier Choices:")
-                            .font(headerFont)
-                            .fontWeight(headerWeight)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
-                        
-                        VStack(spacing: 12) {
-                            ForEach(grocerySuggestions, id: \.productName) { suggestion in
-                                suggestionCard(suggestion)
-                            }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(allAssessments.enumerated()), id: \.offset) { index, item in
+                        HStack(alignment: .top, spacing: 8) {
+                            // Icon (checkmark or X) instead of bullet
+                            Text(item.icon)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(item.bulletColor)
+                                .padding(.top, 2)
+                            
+                            Text(item.text)
+                                .font(bodyFont)
+                                .fontWeight(bodyWeight)
+                                .foregroundColor(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
-                }
-            }
-            .onAppear {
-                if grocerySuggestions.isEmpty && !isLoadingSuggestions {
-                    // Check cache first
-                    if let cachedSuggestions = analysis.suggestions, !cachedSuggestions.isEmpty {
-                        grocerySuggestions = removeDuplicates(cachedSuggestions)
-                    } else {
-                        loadGrocerySuggestions(for: analysis)
                     }
                 }
             }
         )
     }
+    
     
     private func allHealthGoalsSection(analysis: FoodAnalysis) -> some View {
         let healthGoals = healthProfileManager.getHealthGoals()
@@ -901,73 +888,9 @@ struct ScanResultView: View {
         return assessments
     }
     
-    // MARK: - Load Grocery Suggestions
-    private func loadGrocerySuggestions(for analysis: FoodAnalysis) {
-        isLoadingSuggestions = true
-        let nutritionInfo = analysis.nutritionInfoOrDefault
-        
-        AIService.shared.findSimilarGroceryProducts(
-            currentProduct: analysis.foodName,
-            currentScore: analysis.overallScore,
-            nutritionInfo: nutritionInfo
-        ) { result in
-            DispatchQueue.main.async {
-                isLoadingSuggestions = false
-                switch result {
-                case .success(let suggestions):
-                    // Remove duplicates and limit to 2 suggestions
-                    let uniqueSuggestions = removeDuplicates(suggestions)
-                    grocerySuggestions = Array(uniqueSuggestions.prefix(2))
-                    
-                    // Save to cache
-                    saveSuggestionsToCache(grocerySuggestions, for: analysis)
-                case .failure(let error):
-                    print("ScanResultView: Failed to load suggestions: \(error)")
-                    grocerySuggestions = []
-                }
-            }
-        }
-    }
-    
-    // MARK: - Save Suggestions to Cache
-    private func saveSuggestionsToCache(_ suggestions: [GrocerySuggestion], for analysis: FoodAnalysis) {
-        guard !suggestions.isEmpty else { return }
-        
-        // Find cache entry by foodName (most recent)
-        let normalizedName = FoodAnalysis.normalizeInput(analysis.foodName)
-        let matchingEntries = foodCacheManager.cachedAnalyses.filter { entry in
-            let entryNormalizedName = FoodAnalysis.normalizeInput(entry.foodName)
-            return entryNormalizedName == normalizedName
-        }
-        
-        if let entry = matchingEntries.sorted(by: { $0.analysisDate > $1.analysisDate }).first {
-            // Update by imageHash if available, otherwise by cacheKey
-            if let imageHash = entry.imageHash {
-                foodCacheManager.updateSuggestions(forImageHash: imageHash, suggestions: suggestions)
-            } else {
-                foodCacheManager.updateSuggestions(forCacheKey: entry.cacheKey, suggestions: suggestions)
-            }
-        }
-    }
-    
-    // MARK: - Remove Duplicates
-    private func removeDuplicates(_ suggestions: [GrocerySuggestion]) -> [GrocerySuggestion] {
-        var seen = Set<String>()
-        var unique: [GrocerySuggestion] = []
-        
-        for suggestion in suggestions {
-            let key = "\(suggestion.brandName)_\(suggestion.productName)".lowercased()
-            if !seen.contains(key) {
-                seen.insert(key)
-                unique.append(suggestion)
-            }
-        }
-        
-        // If only 1 suggestion, return it (don't duplicate)
-        return unique
-    }
-    
     // MARK: - Suggestion Card (matching Pet Foods style)
+    // NOTE: This function is kept for backward compatibility but is no longer used
+    // HealthierChoicesContainerView now handles suggestion cards
     private func suggestionCard(_ suggestion: GrocerySuggestion) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header with brand, product, and score

@@ -35,6 +35,20 @@ struct ScanResultView: View {
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     
+    // Dropdown expansion state for supplements
+    @State private var isKeyBenefitsExpanded = false
+    @State private var isIngredientsExpanded = false
+    @State private var isDrugInteractionsExpanded = false
+    @State private var isDosageExpanded = false
+    @State private var isSafetyExpanded = false
+    @State private var isQualityExpanded = false
+    
+    // Computed property to detect if displaying supplement
+    var isSupplementScan: Bool {
+        guard let analysis = analysis else { return false }
+        return analysis.scanType == "supplement" || analysis.scanType == "supplement_facts" || scanType == .supplement || scanType == .supplement_facts
+    }
+    
     var body: some View {
         ZStack {
             // Captured image as background (visible around edges)
@@ -347,6 +361,11 @@ struct ScanResultView: View {
                                         }
                                     }
                                     // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
+                                }
+                                
+                                // Supplement-specific dropdowns (only for supplements)
+                                if isSupplementScan {
+                                    supplementDropdowns(analysis: analysis)
                                 }
                             }
                             .onAppear {
@@ -1363,6 +1382,316 @@ struct ScanResultView: View {
             return false
         }
         return dietaryPreference.lowercased().contains("keto")
+    }
+    
+    // MARK: - Supplement Dropdowns
+    
+    private func supplementDropdowns(analysis: FoodAnalysis) -> some View {
+        VStack(spacing: 12) {
+            // Key Benefits dropdown
+            DisclosureGroup(isExpanded: $isKeyBenefitsExpanded) {
+                if !analysis.keyBenefitsOrDefault.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(analysis.keyBenefitsOrDefault, id: \.self) { benefit in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("✓")
+                                    .foregroundColor(Color(red: 0.42, green: 0.557, blue: 0.498))
+                                    .fontWeight(.bold)
+                                Text(benefit)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                } else {
+                    Text("No key benefits listed.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 8)
+                }
+            } label: {
+                HStack {
+                    Text("🎯 Key Benefits")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isKeyBenefitsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Ingredients Analysis dropdown (with research bars for supplements)
+            DisclosureGroup(isExpanded: $isIngredientsExpanded) {
+                if let ingredientAnalyses = analysis.ingredientAnalyses, !ingredientAnalyses.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(ingredientAnalyses) { ingredient in
+                            SupplementIngredientRow(ingredient: ingredient)
+                        }
+                    }
+                    .padding(.top, 8)
+                } else if !analysis.ingredientsOrDefault.isEmpty {
+                    // Fallback to regular ingredients display if ingredientAnalyses not available
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(analysis.ingredientsOrDefault.enumerated()), id: \.offset) { index, ingredient in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("•")
+                                    .foregroundColor(.secondary)
+                                Text(ingredient.name)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                } else {
+                    Text("No ingredients listed.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 8)
+                }
+            } label: {
+                HStack {
+                    Text("🧪 Ingredients Analysis")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isIngredientsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Drug Interactions dropdown
+            DisclosureGroup(isExpanded: $isDrugInteractionsExpanded) {
+                if let drugInteractions = analysis.drugInteractions, !drugInteractions.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(drugInteractions) { interaction in
+                            DrugInteractionRow(interaction: interaction)
+                        }
+                        
+                        // Disclaimer
+                        Text("List is for information only and may not be complete. Always ask your doctor before taking any supplement regularly.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .padding(.top, 8)
+                    }
+                    .padding(.top, 8)
+                } else {
+                    Text("No known drug interactions identified.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 8)
+                }
+            } label: {
+                HStack {
+                    Text("💊 Drug Interactions")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isDrugInteractionsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Dosage Analysis (placeholder - Stage 3)
+            DisclosureGroup(isExpanded: $isDosageExpanded) {
+                HStack {
+                    Text("Tap to load dosage analysis...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundColor(.blue)
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Text("📊 Dosage Analysis")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isDosageExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Safety & Warnings (placeholder - Stage 3)
+            DisclosureGroup(isExpanded: $isSafetyExpanded) {
+                HStack {
+                    Text("Tap to load safety information...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundColor(.blue)
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Text("⚠️ Safety & Warnings")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isSafetyExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Quality Indicators (placeholder - Stage 3)
+            DisclosureGroup(isExpanded: $isQualityExpanded) {
+                HStack {
+                    Text("Tap to load quality indicators...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundColor(.blue)
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Text("✅ Quality Indicators")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: isQualityExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Similar Supplements (existing - keep)
+            if !grocerySuggestions.isEmpty {
+                DisclosureGroup(isExpanded: .constant(false)) {
+                    VStack(spacing: 12) {
+                        ForEach(grocerySuggestions, id: \.productName) { suggestion in
+                            suggestionCard(suggestion)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack {
+                        Text("⭐ Similar Supplements")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Supplement Ingredient Row
+
+struct SupplementIngredientRow: View {
+    let ingredient: IngredientAnalysis
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Name and amount
+            HStack {
+                Image(systemName: "checkmark.square.fill")
+                    .foregroundColor(.green)
+                Text("\(ingredient.name) — \(ingredient.amount)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            
+            // Brief summary (under name, above research bar)
+            Text(ingredient.briefSummary)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            // Research rating bar
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Human Research Support Rating")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(ingredient.researchScore)/100")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                }
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 8)
+                            .cornerRadius(4)
+                        
+                        Rectangle()
+                            .fill(researchBarColor(for: ingredient.researchScore))
+                            .frame(width: geometry.size.width * CGFloat(ingredient.researchScore) / 100, height: 8)
+                            .cornerRadius(4)
+                    }
+                }
+                .frame(height: 8)
+                
+                // Rating text (under the bar)
+                Text(ingredient.researchRating)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    func researchBarColor(for score: Int) -> Color {
+        switch score {
+        case 90...100: return .green
+        case 75...89: return .blue
+        case 60...74: return .cyan
+        case 40...59: return .yellow
+        case 20...39: return .orange
+        default: return .red
+        }
+    }
+}
+
+// MARK: - Drug Interaction Row
+
+struct DrugInteractionRow: View {
+    let interaction: DrugInteraction
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: interaction.severity == "serious" ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(interaction.severity == "serious" ? .red : .orange)
+                Text(interaction.drugCategory)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            
+            Text(interaction.interaction)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
     }
 }
 

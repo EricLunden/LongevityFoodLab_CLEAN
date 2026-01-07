@@ -473,45 +473,107 @@ struct SupplementsView: View {
         let top3Goals = Array(healthGoals.prefix(3))
         let healthGoalsText = top3Goals.isEmpty ? "general health and longevity" : top3Goals.joined(separator: ", ")
         
-        // Use existing prompt (will be enhanced in Stage 2)
+        // Enhanced prompt for Stage 2 - requests ingredientAnalyses and drugInteractions
         let prompt = """
-        You are a precision nutrition analysis system. Analyze these images and return ONLY valid JSON.
+        You are a precision nutrition analysis system. Analyze these supplement images and return ONLY valid JSON.
 
-        🚫 CRITICAL PROHIBITION - READ THIS FIRST:
-        NEVER mention age, gender, or demographics in the summary. Examples of FORBIDDEN phrases:
-        - "young male", "young female", "adult", "elderly"
-        - "men", "women", "males", "females"
-        - "under 30", "over 50", any age reference
-        - "particularly beneficial for a [demographic]"
-        - "especially for [demographic]"
-        
-        If you see these terms in your response, DELETE THEM. Use ONLY "your", "you", "your body", "your goals" - never demographic terms.
+        🚫 CRITICAL PROHIBITION:
+        NEVER mention age, gender, or demographics. Use ONLY "your", "you", "your body", "your goals".
 
-        STEP 1: Identify the scan type (CRITICAL - determines how item is stored):
-        - "supplement" = supplement bottle/package
-        
         IMAGE INSTRUCTIONS:
-        - Image 1 is the FRONT of the supplement bottle - extract the product name and brand from this image
-        - Image 2 is the SUPPLEMENT FACTS panel - extract all ingredients, amounts, and forms from this image
-        
-        FOR SUPPLEMENTS (scanType = "supplement"):
-        - Read ALL values from visible supplement facts labels
-        - Identify active ingredients and their dosages
-        - Note any fillers, binders, or additives
-        - Check for potential interactions or warnings
-        - The "summary" field must be exactly 3 sentences:
-          1. First sentence: Strengths and benefits for common health concerns
-          2. Second sentence: Weaknesses, limitations, or concerns for health
-          3. Third sentence: Any recalls, safety warnings, or hazards (if none, state "No known recalls or safety hazards")
+        - Image 1 is the FRONT of the supplement bottle - extract the product name and brand
+        - Image 2 is the SUPPLEMENT FACTS panel - extract ALL ingredients with exact amounts and forms
 
-        Return ONLY this JSON structure (no markdown, no explanation). The JSON should have these fields:
-        - scanType: "supplement"
-        - foodName: Supplement name from front label (Image 1)
-        - needsBackScan: false
-        - overallScore: 0-100
-        - summary: Provide comprehensive analysis including: 1) Product overview and key ingredients with exact amounts, 2) Ingredient form quality assessment (e.g., magnesium citrate vs oxide), 3) Dosage evaluation compared to recommended daily values, 4) Bioavailability considerations, 5) Strengths and benefits, 6) Weaknesses or concerns, 7) Any recalls or warnings (if none, state so), 8) Impact on your health goals: \(healthGoalsText). Be thorough and detailed. Use 'your' not 'the user's'.
-        - healthScores: Object with allergies, antiInflammation, bloodSugar, brainHealth, detoxLiver, energy, eyeHealth, heartHealth, immune, jointHealth, kidneys, mood, skin, sleep, stress, weightManagement (each 0-100)
-        - servingSize: Typical serving size from label
+        🚫 CRITICAL ACCURACY RULES:
+        - ONLY list ingredients that are VISIBLE on the Supplement Facts panel
+        - NEVER guess or assume ingredients that are not shown
+        - Include branded/trademarked ingredient names exactly as shown (e.g., "Crominex® 3+", "CalaMarine®", "Hydro Q-Sorb®")
+        - Include the specific form in parentheses if shown (e.g., "as ubiquinone", "as pyridoxine hydrochloride")
+        - Include exact amounts from the label with units (e.g., "100mg", "680mcg DFE")
+        - If you cannot read an ingredient clearly, do NOT include it
+        - DO NOT add common supplements that are not on the label
+
+        RESEARCH SCORE CRITERIA (1-100):
+        Rate each ingredient based on quality and quantity of human research:
+        - 90-100 (Gold Standard): Large high-quality RCT OR meta-analysis with clear positive findings OR extensive research (10+ quality studies) + long safety history
+        - 75-89 (Strong Evidence): Multiple quality human studies with consistent results, OR one excellent RCT, OR centuries of traditional use + modern mechanistic understanding
+        - 60-74 (Good Evidence): Several small human studies with positive results + plausible mechanism + good safety profile
+        - 40-59 (Emerging Evidence): 1-2 small human studies with promising results, OR strong animal data + early human trials
+        - 20-39 (Limited Evidence): Animal/cell studies only, but strong mechanistic rationale
+        - 1-19 (Insufficient Evidence): Minimal research, theoretical benefits only
+
+        Quality factors that INCREASE score:
+        - Gold-standard RCT (double-blind, placebo-controlled)
+        - Meta-analysis or systematic review
+        - Long history of safe use (50+ years)
+        - Well-understood mechanism
+        - Large sample sizes (500+ participants)
+        - Replicated by independent labs
+
+        Quality factors that DECREASE score:
+        - Only animal/cell studies
+        - Conflicting results
+        - Only small sample sizes
+        - Industry-funded only
+        - Short study durations
+
+        DRUG INTERACTION RULES:
+        - List drug categories that may interact with ANY ingredient
+        - Include: category name, specific interaction risk, severity (moderate/serious)
+        - Common categories to check: Blood thinners, Statins, Blood pressure meds, Diabetes meds, Thyroid meds, Immunosuppressants, Antidepressants, Sedatives
+        - Only include interactions with clinical relevance
+        - If no known interactions, return empty array
+
+        Return ONLY this JSON structure:
+        {
+            "scanType": "supplement",
+            "foodName": "Product Name from front label",
+            "overallScore": 0-100,
+            "summary": "Comprehensive analysis: 1) Product overview with key ingredients and amounts, 2) Ingredient form quality assessment, 3) Dosage evaluation vs clinical ranges, 4) Bioavailability considerations, 5) Strengths and benefits, 6) Weaknesses or concerns, 7) Any recalls or warnings, 8) Impact on health goals: \(healthGoalsText). Be thorough.",
+            "healthScores": {
+                "allergies": 0-100,
+                "antiInflammation": 0-100,
+                "bloodSugar": 0-100,
+                "brainHealth": 0-100,
+                "detoxLiver": 0-100,
+                "energy": 0-100,
+                "eyeHealth": 0-100,
+                "heartHealth": 0-100,
+                "immune": 0-100,
+                "jointHealth": 0-100,
+                "kidneys": 0-100,
+                "mood": 0-100,
+                "skin": 0-100,
+                "sleep": 0-100,
+                "stress": 0-100,
+                "weightManagement": 0-100
+            },
+            "servingSize": "From label",
+            "keyBenefits": ["benefit1", "benefit2", "benefit3"],
+            "ingredientAnalyses": [
+                {
+                    "name": "Full ingredient name with brand (e.g., Coenzyme Q10 (Hydro Q-Sorb®))",
+                    "amount": "100mg",
+                    "form": "ubiquinone",
+                    "researchScore": 92,
+                    "briefSummary": "One sentence about what this ingredient does"
+                }
+            ],
+            "drugInteractions": [
+                {
+                    "drugCategory": "Blood Thinners (Warfarin, Aspirin)",
+                    "interaction": "May increase bleeding risk",
+                    "severity": "moderate"
+                }
+            ],
+            "overallResearchScore": 85
+        }
+
+        IMPORTANT:
+        - ingredientAnalyses must include EVERY ingredient from the Supplement Facts panel
+        - Each ingredient needs a researchScore based on the criteria above
+        - drugInteractions should only include clinically relevant interactions
+        - overallResearchScore is the weighted average of individual ingredient scores
         """
         
         // Build message content with TWO images
@@ -605,6 +667,16 @@ struct SupplementsView: View {
         
         // Decode analysis with scanType
         var analysis = try JSONDecoder().decode(FoodAnalysis.self, from: analysisData)
+        
+        // Log new data fields
+        print("📦 SUPPLEMENT: ingredientAnalyses count: \(analysis.ingredientAnalyses?.count ?? 0)")
+        print("📦 SUPPLEMENT: drugInteractions count: \(analysis.drugInteractions?.count ?? 0)")
+        print("📦 SUPPLEMENT: Overall research score: \(analysis.overallResearchScore ?? 0)")
+        if let ingredients = analysis.ingredientAnalyses {
+            for ing in ingredients {
+                print("  - \(ing.name): \(ing.researchScore) (\(ing.researchRating))")
+            }
+        }
         
         // If scanType wasn't in the decoded struct, add it manually
         if analysis.scanType == nil, let scanTypeString = scanTypeString {

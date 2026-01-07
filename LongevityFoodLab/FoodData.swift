@@ -37,6 +37,14 @@ struct FoodAnalysis: Codable, Equatable {
     let foodNames: [String]? // For meals: list of individual food items visible in the image (e.g., ["Grilled Chicken", "Avocado", "Lettuce"])
     let suggestions: [GrocerySuggestion]? // Optional - healthier choice suggestions (cached)
     
+    // Supplement-specific fields (nil for groceries/meals)
+    let ingredientAnalyses: [IngredientAnalysis]?    // Detailed ingredients with research scores
+    let drugInteractions: [DrugInteraction]?          // Drug interaction warnings
+    let overallResearchScore: Int?                    // Average research score across ingredients
+    
+    // Lazy-loaded secondary details (populated on demand)
+    var secondaryDetails: SupplementSecondaryDetails? // Dosage, safety, quality — loaded on tap
+    
     // Data completeness and source tracking (optional for backward compatibility)
     let dataCompleteness: DataCompleteness?
     let analysisTimestamp: Date?
@@ -189,7 +197,11 @@ struct FoodAnalysis: Codable, Equatable {
             suggestions: suggestions,
             dataCompleteness: dataCompleteness,
             analysisTimestamp: analysisTimestamp,
-            dataSource: dataSource
+            dataSource: dataSource,
+            ingredientAnalyses: ingredientAnalyses,
+            drugInteractions: drugInteractions,
+            overallResearchScore: overallResearchScore,
+            secondaryDetails: secondaryDetails
         )
     }
     
@@ -214,6 +226,12 @@ struct FoodAnalysis: Codable, Equatable {
         dataCompleteness = try container.decodeIfPresent(DataCompleteness.self, forKey: .dataCompleteness)
         analysisTimestamp = try container.decodeIfPresent(Date.self, forKey: .analysisTimestamp)
         dataSource = try container.decodeIfPresent(DataSource.self, forKey: .dataSource)
+        
+        // New supplement fields with defaults for backward compatibility
+        ingredientAnalyses = try container.decodeIfPresent([IngredientAnalysis].self, forKey: .ingredientAnalyses)
+        drugInteractions = try container.decodeIfPresent([DrugInteraction].self, forKey: .drugInteractions)
+        overallResearchScore = try container.decodeIfPresent(Int.self, forKey: .overallResearchScore)
+        secondaryDetails = try container.decodeIfPresent(SupplementSecondaryDetails.self, forKey: .secondaryDetails)
     }
     
     // Custom encoder
@@ -235,6 +253,10 @@ struct FoodAnalysis: Codable, Equatable {
         try container.encodeIfPresent(dataCompleteness, forKey: .dataCompleteness)
         try container.encodeIfPresent(analysisTimestamp, forKey: .analysisTimestamp)
         try container.encodeIfPresent(dataSource, forKey: .dataSource)
+        try container.encodeIfPresent(ingredientAnalyses, forKey: .ingredientAnalyses)
+        try container.encodeIfPresent(drugInteractions, forKey: .drugInteractions)
+        try container.encodeIfPresent(overallResearchScore, forKey: .overallResearchScore)
+        try container.encodeIfPresent(secondaryDetails, forKey: .secondaryDetails)
     }
     
     enum CodingKeys: String, CodingKey {
@@ -253,6 +275,10 @@ struct FoodAnalysis: Codable, Equatable {
         case dataCompleteness
         case analysisTimestamp
         case dataSource
+        case ingredientAnalyses
+        case drugInteractions
+        case overallResearchScore
+        case secondaryDetails
     }
     
     // Regular initializer
@@ -271,7 +297,11 @@ struct FoodAnalysis: Codable, Equatable {
         suggestions: [GrocerySuggestion]? = nil,
         dataCompleteness: DataCompleteness? = nil,
         analysisTimestamp: Date? = nil,
-        dataSource: DataSource? = nil
+        dataSource: DataSource? = nil,
+        ingredientAnalyses: [IngredientAnalysis]? = nil,
+        drugInteractions: [DrugInteraction]? = nil,
+        overallResearchScore: Int? = nil,
+        secondaryDetails: SupplementSecondaryDetails? = nil
     ) {
         self.foodName = foodName
         self.overallScore = overallScore
@@ -288,6 +318,10 @@ struct FoodAnalysis: Codable, Equatable {
         self.dataCompleteness = dataCompleteness
         self.analysisTimestamp = analysisTimestamp
         self.dataSource = dataSource
+        self.ingredientAnalyses = ingredientAnalyses
+        self.drugInteractions = drugInteractions
+        self.overallResearchScore = overallResearchScore
+        self.secondaryDetails = secondaryDetails
     }
 }
 
@@ -568,4 +602,105 @@ struct NutritionInfo: Codable, Equatable {
         self.manganese = manganese
         self.thiamin = thiamin
     }
+}
+
+// MARK: - Supplement-Specific Models
+
+/// Detailed ingredient analysis with research support rating
+struct IngredientAnalysis: Codable, Identifiable, Equatable {
+    let id: UUID
+    let name: String              // "Coenzyme Q10 (Hydro Q-Sorb®)"
+    let amount: String            // "100mg"
+    let form: String?             // "ubiquinone" — nil if not specified
+    let researchScore: Int        // 1-100 based on human studies
+    let researchRating: String    // "Gold Standard", "Strong Evidence", etc.
+    let briefSummary: String      // "Supports cellular energy production"
+    
+    init(id: UUID = UUID(), name: String, amount: String, form: String? = nil, researchScore: Int, briefSummary: String) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.form = form
+        self.researchScore = researchScore
+        self.researchRating = IngredientAnalysis.ratingText(for: researchScore)
+        self.briefSummary = briefSummary
+    }
+    
+    static func ratingText(for score: Int) -> String {
+        switch score {
+        case 90...100: return "Gold Standard"
+        case 75...89: return "Strong Evidence"
+        case 60...74: return "Good Evidence"
+        case 40...59: return "Emerging Evidence"
+        case 20...39: return "Limited Evidence"
+        default: return "Insufficient Evidence"
+        }
+    }
+}
+
+/// Drug interaction warning
+struct DrugInteraction: Codable, Identifiable, Equatable {
+    let id: UUID
+    let drugCategory: String      // "Blood Thinners (Warfarin, Aspirin)"
+    let interaction: String       // "May increase bleeding risk"
+    let severity: String          // "moderate" or "serious"
+    
+    init(id: UUID = UUID(), drugCategory: String, interaction: String, severity: String) {
+        self.id = id
+        self.drugCategory = drugCategory
+        self.interaction = interaction
+        self.severity = severity
+    }
+}
+
+/// Dosage comparison to clinical ranges (for lazy-load secondary call)
+struct DosageAnalysis: Codable, Identifiable, Equatable {
+    let id: UUID
+    let ingredient: String        // "CoQ10"
+    let labelDose: String         // "100mg"
+    let clinicalRange: String     // "100-200mg"
+    let verdict: String           // "optimal", "low", "high"
+    
+    init(id: UUID = UUID(), ingredient: String, labelDose: String, clinicalRange: String, verdict: String) {
+        self.id = id
+        self.ingredient = ingredient
+        self.labelDose = labelDose
+        self.clinicalRange = clinicalRange
+        self.verdict = verdict
+    }
+}
+
+/// Safety warning
+struct SafetyWarning: Codable, Identifiable, Equatable {
+    let id: UUID
+    let warning: String           // "Not recommended during pregnancy"
+    let category: String          // "pregnancy", "nursing", "age", "sideEffect"
+    
+    init(id: UUID = UUID(), warning: String, category: String) {
+        self.id = id
+        self.warning = warning
+        self.category = category
+    }
+}
+
+/// Quality indicator from label
+struct QualityIndicator: Codable, Identifiable, Equatable {
+    let id: UUID
+    let indicator: String         // "Third-party tested"
+    let status: String            // "positive", "negative", "neutral"
+    let detail: String?           // "USP verified logo visible"
+    
+    init(id: UUID = UUID(), indicator: String, status: String, detail: String? = nil) {
+        self.id = id
+        self.indicator = indicator
+        self.status = status
+        self.detail = detail
+    }
+}
+
+/// Container for lazy-loaded secondary details
+struct SupplementSecondaryDetails: Codable, Equatable {
+    let dosageAnalyses: [DosageAnalysis]
+    let safetyWarnings: [SafetyWarning]
+    let qualityIndicators: [QualityIndicator]
 }

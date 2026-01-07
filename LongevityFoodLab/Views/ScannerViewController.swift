@@ -22,6 +22,7 @@ struct ScannerViewController: UIViewControllerRepresentable {
     let mode: ScannerMode
     let onBarcodeCaptured: (UIImage, String?) -> Void
     let onFrontLabelCaptured: (UIImage) -> Void
+    var onSupplementScanComplete: ((UIImage, UIImage) -> Void)? = nil
     
     func makeUIViewController(context: Context) -> ScannerVC {
         let controller = ScannerVC()
@@ -56,6 +57,10 @@ struct ScannerViewController: UIViewControllerRepresentable {
         func didCancel() {
             parent.isPresented = false
         }
+        
+        func didCompleteSupplementScan(frontImage: UIImage, factsImage: UIImage) {
+            parent.onSupplementScanComplete?(frontImage, factsImage)
+        }
     }
 }
 
@@ -63,12 +68,18 @@ protocol ScannerVCDelegate: AnyObject {
     func didCaptureBarcodeImage(_ image: UIImage, barcode: String?)
     func didCaptureFrontLabelImage(_ image: UIImage)
     func didCancel()
+    func didCompleteSupplementScan(frontImage: UIImage, factsImage: UIImage)
 }
 
 enum ScannerState {
     case scanningBarcode
     case barcodeDetected
     case capturingFrontLabel
+}
+
+enum SupplementCapturePhase {
+    case frontLabel         // First: product name image
+    case supplementFacts    // Second: ingredients image
 }
 
 class ScannerVC: UIViewController {
@@ -85,10 +96,16 @@ class ScannerVC: UIViewController {
     private var buttonContainer: UIView?
     private var scanningOverlay: UIView?
     private var promptLabel: UILabel?
+    private var subtextLabel: UILabel?
     
     private var currentState: ScannerState = .scanningBarcode
     private var detectedBarcode: String?
     private var barcodeImage: UIImage?
+    
+    // For supplements two-capture flow
+    private var supplementPhase: SupplementCapturePhase = .frontLabel
+    private var frontLabelImage: UIImage?
+    private var supplementFactsImage: UIImage?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -96,10 +113,16 @@ class ScannerVC: UIViewController {
         // Set initial state based on mode
         if scannerMode == .supplements {
             currentState = .capturingFrontLabel  // Skip barcode phase for supplements
+            supplementPhase = .frontLabel  // Start with front label capture
         }
         
         setupCamera()
         setupUI()
+        
+        // Update supplement UI if in supplements mode
+        if scannerMode == .supplements {
+            updateSupplementUI()
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -246,6 +269,19 @@ class ScannerVC: UIViewController {
         view.addSubview(promptLabel)
         self.promptLabel = promptLabel
         
+        // Subtext label for supplements two-phase guidance
+        let subtextLabel = UILabel()
+        subtextLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        subtextLabel.textColor = .white
+        subtextLabel.textAlignment = .center
+        subtextLabel.numberOfLines = 0
+        subtextLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        subtextLabel.layer.cornerRadius = 8
+        subtextLabel.isHidden = (scannerMode == .groceries)
+        subtextLabel.layer.masksToBounds = true
+        view.addSubview(subtextLabel)
+        self.subtextLabel = subtextLabel
+        
         // Ensure button container is on top
         view.bringSubviewToFront(container)
     }
@@ -343,6 +379,20 @@ class ScannerVC: UIViewController {
             )
             promptLabel.layer.masksToBounds = true
         }
+        
+        // Update subtext label position (below prompt label for supplements)
+        if let subtextLabel = subtextLabel, scannerMode == .supplements {
+            let promptBottom = (promptLabel?.frame.maxY ?? 0) + 8
+            let subtextWidth = view.bounds.width - 40
+            let subtextHeight: CGFloat = 40
+            subtextLabel.frame = CGRect(
+                x: 20,
+                y: promptBottom,
+                width: subtextWidth,
+                height: subtextHeight
+            )
+            subtextLabel.layer.masksToBounds = true
+        }
     }
     
     // MARK: - Button Gradient Helpers
@@ -380,6 +430,43 @@ class ScannerVC: UIViewController {
         
         // Set dark gray background color
         button.backgroundColor = UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+    }
+    
+    private func updateSupplementUI() {
+        guard scannerMode == .supplements else { return }
+        
+        switch supplementPhase {
+        case .frontLabel:
+            promptLabel?.text = "Photograph the FRONT of the bottle"
+            subtextLabel?.text = "This will be your reference image"
+            captureButton?.setTitle("Capture Front", for: .normal)
+            
+        case .supplementFacts:
+            promptLabel?.text = "Now photograph the SUPPLEMENT FACTS panel"
+            subtextLabel?.text = "Usually on the back — this is used for analysis"
+            captureButton?.setTitle("Capture Supplement Facts", for: .normal)
+        }
+    }
+    
+    private func handleSupplementCapture(_ image: UIImage) {
+        switch supplementPhase {
+        case .frontLabel:
+            print("📸 SUPPLEMENT: Phase 1 - Front label captured")
+            frontLabelImage = image
+            supplementPhase = .supplementFacts
+            updateSupplementUI()
+            // Stay in scanner for second capture
+            
+        case .supplementFacts:
+            print("📸 SUPPLEMENT: Phase 2 - Supplement Facts captured")
+            supplementFactsImage = image
+            // Both images captured — call completion
+            if let front = frontLabelImage, let facts = supplementFactsImage {
+                delegate?.didCompleteSupplementScan(frontImage: front, factsImage: facts)
+            }
+            // Dismiss scanner
+            stopSession()
+        }
     }
     
     private func updateScanningOverlay() {
@@ -623,8 +710,9 @@ class ScannerVC: UIViewController {
 extension ScannerVC: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         // Don't stop session here - we need it running for front label capture
-        // Only stop if we're capturing front label (final capture)
-        if currentState == .capturingFrontLabel {
+        // Only stop if we're capturing front label (final capture) AND it's groceries mode
+        // For supplements, we keep session running between captures
+        if currentState == .capturingFrontLabel && scannerMode == .groceries {
             captureSession?.stopRunning()
         }
         
@@ -686,39 +774,46 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
         
         print("Scanner: Image extracted successfully, processing...")
         
-        // Handle based on current state
+        // Handle based on current state and mode
         switch currentState {
         case .scanningBarcode, .barcodeDetected:
-            // This is the auto-captured barcode image
-            barcodeImage = capturedImage
-            if let barcode = detectedBarcode {
-                print("Scanner: Processing barcode image with barcode: \(barcode)")
-                processBarcodeImage(capturedImage, barcode: barcode)
-                // Restart session for front label capture
-                startSession()
-                // Transition to front label capture state
-                transitionToState(.capturingFrontLabel)
-            } else {
-                // Fallback: detect barcode from image
-                detectBarcode(in: capturedImage) { [weak self] barcode in
-                    if let barcode = barcode {
-                        print("Scanner: Barcode detected from image: \(barcode)")
-                        self?.processBarcodeImage(capturedImage, barcode: barcode)
-                        // Restart session for front label capture
-                        self?.startSession()
-                        self?.transitionToState(.capturingFrontLabel)
-                    } else {
-                        print("Scanner: No barcode detected, canceling")
-                        self?.delegate?.didCancel()
+            // This is the auto-captured barcode image (groceries only)
+            if scannerMode == .groceries {
+                barcodeImage = capturedImage
+                if let barcode = detectedBarcode {
+                    print("Scanner: Processing barcode image with barcode: \(barcode)")
+                    processBarcodeImage(capturedImage, barcode: barcode)
+                    // Restart session for front label capture
+                    startSession()
+                    // Transition to front label capture state
+                    transitionToState(.capturingFrontLabel)
+                } else {
+                    // Fallback: detect barcode from image
+                    detectBarcode(in: capturedImage) { [weak self] barcode in
+                        if let barcode = barcode {
+                            print("Scanner: Barcode detected from image: \(barcode)")
+                            self?.processBarcodeImage(capturedImage, barcode: barcode)
+                            // Restart session for front label capture
+                            self?.startSession()
+                            self?.transitionToState(.capturingFrontLabel)
+                        } else {
+                            print("Scanner: No barcode detected, canceling")
+                            self?.delegate?.didCancel()
+                        }
                     }
                 }
             }
             
         case .capturingFrontLabel:
             // This is the front label image
-            print("Scanner: Processing front label image")
-            processFrontLabelImage(capturedImage)
-            
+            if scannerMode == .supplements {
+                // Handle supplements two-phase capture
+                handleSupplementCapture(capturedImage)
+            } else {
+                // Groceries: process front label image
+                print("Scanner: Processing front label image")
+                processFrontLabelImage(capturedImage)
+            }
         }
     }
     

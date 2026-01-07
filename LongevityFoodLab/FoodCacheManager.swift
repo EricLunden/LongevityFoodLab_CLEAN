@@ -246,7 +246,10 @@ class FoodCacheManager: ObservableObject {
     // MARK: - Image Storage
     
     func saveImage(_ image: UIImage, forHash imageHash: String) {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else { return }
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("🔍 FoodCacheManager: Failed to convert image to JPEG data for hash: \(imageHash.prefix(16))...")
+            return
+        }
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let imagesPath = documentsPath.appendingPathComponent("GroceryScanImages")
@@ -255,7 +258,12 @@ class FoodCacheManager: ObservableObject {
         try? FileManager.default.createDirectory(at: imagesPath, withIntermediateDirectories: true)
         
         let imageURL = imagesPath.appendingPathComponent("\(imageHash).jpg")
-        try? imageData.write(to: imageURL)
+        do {
+            try imageData.write(to: imageURL)
+            print("🔍 FoodCacheManager: Saved image file for hash: \(imageHash.prefix(16))..., size: \(imageData.count) bytes")
+        } catch {
+            print("🔍 FoodCacheManager: ERROR saving image file for hash: \(imageHash.prefix(16))...: \(error)")
+        }
     }
     
     func loadImage(forHash imageHash: String?) -> UIImage? {

@@ -532,6 +532,33 @@ struct FoodIngredient: Codable, Equatable {
     let name: String
     let impact: String
     let explanation: String
+    let amount: String?  // Optional - used for supplements
+    
+    init(name: String, impact: String = "", explanation: String = "", amount: String? = nil) {
+        self.name = name
+        self.impact = impact
+        self.explanation = explanation
+        self.amount = amount
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        // Handle both formats: supplements use "amount", groceries use "impact" and "explanation"
+        if let amountValue = try? container.decode(String.self, forKey: .amount) {
+            amount = amountValue
+            impact = ""  // Default for supplements
+            explanation = ""  // Default for supplements
+        } else {
+            amount = nil
+            impact = try container.decodeIfPresent(String.self, forKey: .impact) ?? ""
+            explanation = try container.decodeIfPresent(String.self, forKey: .explanation) ?? ""
+        }
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case name, impact, explanation, amount
+    }
 }
 
 // MARK: - Grocery Suggestions (for Healthier Choices)
@@ -645,6 +672,22 @@ struct IngredientAnalysis: Codable, Identifiable, Equatable {
         default: return "Insufficient Evidence"
         }
     }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()  // Generate UUID - AI doesn't return this
+        name = try container.decode(String.self, forKey: .name)
+        amount = try container.decode(String.self, forKey: .amount)
+        form = try container.decodeIfPresent(String.self, forKey: .form)
+        researchScore = try container.decode(Int.self, forKey: .researchScore)
+        researchRating = IngredientAnalysis.ratingText(for: researchScore)  // Computed
+        briefSummary = try container.decode(String.self, forKey: .briefSummary)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case name, amount, form, researchScore, briefSummary
+        // Note: id and researchRating are NOT here
+    }
 }
 
 /// Drug interaction warning
@@ -659,6 +702,19 @@ struct DrugInteraction: Codable, Identifiable, Equatable {
         self.drugCategory = drugCategory
         self.interaction = interaction
         self.severity = severity
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()  // Generate UUID - AI doesn't return this
+        drugCategory = try container.decode(String.self, forKey: .drugCategory)
+        interaction = try container.decode(String.self, forKey: .interaction)
+        severity = try container.decode(String.self, forKey: .severity)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case drugCategory, interaction, severity
+        // Note: id is NOT here
     }
 }
 
@@ -677,6 +733,20 @@ struct DosageAnalysis: Codable, Identifiable, Equatable {
         self.clinicalRange = clinicalRange
         self.verdict = verdict
     }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()  // Generate UUID - AI doesn't return this
+        ingredient = try container.decode(String.self, forKey: .ingredient)
+        labelDose = try container.decode(String.self, forKey: .labelDose)
+        clinicalRange = try container.decode(String.self, forKey: .clinicalRange)
+        verdict = try container.decode(String.self, forKey: .verdict)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case ingredient, labelDose, clinicalRange, verdict
+        // Note: id is NOT here
+    }
 }
 
 /// Safety warning
@@ -689,6 +759,18 @@ struct SafetyWarning: Codable, Identifiable, Equatable {
         self.id = id
         self.warning = warning
         self.category = category
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()  // Generate UUID - AI doesn't return this
+        warning = try container.decode(String.self, forKey: .warning)
+        category = try container.decode(String.self, forKey: .category)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case warning, category
+        // Note: id is NOT here
     }
 }
 
@@ -704,6 +786,19 @@ struct QualityIndicator: Codable, Identifiable, Equatable {
         self.indicator = indicator
         self.status = status
         self.detail = detail
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()  // Generate UUID - AI doesn't return this
+        indicator = try container.decode(String.self, forKey: .indicator)
+        status = try container.decode(String.self, forKey: .status)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case indicator, status, detail
+        // Note: id is NOT here
     }
 }
 

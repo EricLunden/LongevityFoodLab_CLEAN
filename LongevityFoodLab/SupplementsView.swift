@@ -54,24 +54,16 @@ struct SupplementsView: View {
         .fullScreenCover(isPresented: $showingScanner) {
             ScannerViewController(
                 isPresented: $showingScanner,
+                mode: .supplements,
                 onBarcodeCaptured: { image, barcode in
-                    print("SupplementsView: Barcode image captured, barcode: \(barcode ?? "none")")
-                    
-                    // Store barcode image for analysis
-                    capturedImage = image
-                    
-                    // Generate hash for image
-                    if let imageData = image.jpegData(compressionQuality: 0.8) {
-                        currentImageHash = FoodCacheManager.hashImage(imageData)
-                    }
-                    
-                    // Start analysis immediately (supplements may not need barcode, but handle it if present)
-                    analyzeScannedImage(image, barcode: barcode)
+                    // Supplements mode skips barcode - this callback won't be called
+                    // But kept for compatibility with ScannerViewController interface
+                    print("SupplementsView: Barcode callback (should not be called in supplements mode)")
                 },
                 onFrontLabelCaptured: { image in
                     print("SupplementsView: Front label image captured")
                     
-                    // Store front label image for grid display (separate from barcode image)
+                    // Store front label image for grid display
                     frontLabelImage = image
                     
                     // Generate hash for front label image
@@ -79,15 +71,12 @@ struct SupplementsView: View {
                         frontLabelImageHash = FoodCacheManager.hashImage(imageData)
                     }
                     
-                    // If no barcode was captured, use front label for analysis
-                    if capturedImage == nil {
-                        capturedImage = image
-                        if let imageData = image.jpegData(compressionQuality: 0.8) {
-                            currentImageHash = FoodCacheManager.hashImage(imageData)
-                        }
-                        // Start analysis with front label image
-                        analyzeScannedImage(image, barcode: nil)
-                    }
+                    // Use front label for analysis (no barcode in supplements mode)
+                    capturedImage = image
+                    currentImageHash = frontLabelImageHash
+                    
+                    // Start analysis with front label image
+                    analyzeScannedImage(image, barcode: nil)
                     
                     // Dismiss camera
                     showingScanner = false
@@ -196,8 +185,8 @@ struct SupplementsView: View {
         // Phase 1: Barcode detection complete - barcode is now available
         // Phase 2: Will use barcode if supplement lookup APIs are added
         
-        // Optimize image (resize + compress) for faster API uploads
-        guard let imageData = image.optimizedForAPI() else {
+        // Optimize image for supplements (high quality: 1280px @ 0.85 quality)
+        guard let imageData = image.optimizedForSupplements() else {
             print("SupplementsView: Failed to optimize image")
             showingScanResult = false
             return
@@ -206,6 +195,9 @@ struct SupplementsView: View {
         // Generate image hash for caching
         let imageHash = FoodCacheManager.hashImage(imageData)
         currentImageHash = imageHash
+        
+        let sizeKB = Double(imageData.count) / 1024.0
+        print("📦 SUPPLEMENT SCAN: Image size \(String(format: "%.1f", sizeKB)) KB, max_tokens: 2500")
         print("SupplementsView: Image hash: \(imageHash)")
         
         // Pre-save image to disk cache immediately (before API call)
@@ -302,14 +294,14 @@ struct SupplementsView: View {
         - foodName: Supplement name from label
         - needsBackScan: false
         - overallScore: 0-100
-        - summary: Write exactly 3 sentences: 1) Strengths and benefits, 2) Weaknesses/concerns, 3) Recalls/safety warnings. End with impact on: \(healthGoalsText). Use 'your' not 'the user's'.
+        - summary: Provide comprehensive analysis including: 1) Product overview and key ingredients with exact amounts, 2) Ingredient form quality assessment (e.g., magnesium citrate vs oxide), 3) Dosage evaluation compared to recommended daily values, 4) Bioavailability considerations, 5) Strengths and benefits, 6) Weaknesses or concerns, 7) Any recalls or warnings (if none, state so), 8) Impact on your health goals: \(healthGoalsText). Be thorough and detailed. Use 'your' not 'the user's'.
         - healthScores: Object with allergies, antiInflammation, bloodSugar, brainHealth, detoxLiver, energy, eyeHealth, heartHealth, immune, jointHealth, kidneys, mood, skin, sleep, stress, weightManagement (each 0-100)
         - servingSize: Typical serving size from label
         """
         
         let requestBody: [String: Any] = [
             "model": SecureConfig.openAIModelName,
-            "max_tokens": 500,
+            "max_tokens": 2500,
             "temperature": 0.1,
             "response_format": [
                 "type": "json_object"

@@ -221,6 +221,7 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showingScanner) {
             ScannerViewController(
                 isPresented: $showingScanner,
+                mode: .groceries,
                 onBarcodeCaptured: { image, barcode in
                     print("ContentView: Barcode image captured, barcode: \(barcode ?? "none")")
                     

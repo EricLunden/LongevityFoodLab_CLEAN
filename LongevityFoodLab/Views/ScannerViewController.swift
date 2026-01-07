@@ -12,14 +12,21 @@ import CoreImage
 import CoreGraphics
 import Vision
 
+enum ScannerMode {
+    case groceries    // Keep barcode detection
+    case supplements  // Skip barcode detection
+}
+
 struct ScannerViewController: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
+    let mode: ScannerMode
     let onBarcodeCaptured: (UIImage, String?) -> Void
     let onFrontLabelCaptured: (UIImage) -> Void
     
     func makeUIViewController(context: Context) -> ScannerVC {
         let controller = ScannerVC()
         controller.delegate = context.coordinator
+        controller.scannerMode = mode
         return controller
     }
     
@@ -67,6 +74,8 @@ enum ScannerState {
 class ScannerVC: UIViewController {
     weak var delegate: ScannerVCDelegate?
     
+    var scannerMode: ScannerMode = .groceries  // Default to groceries for backward compatibility
+    
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
     private var metadataOutput: AVCaptureMetadataOutput?
@@ -83,6 +92,12 @@ class ScannerVC: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        // Set initial state based on mode
+        if scannerMode == .supplements {
+            currentState = .capturingFrontLabel  // Skip barcode phase for supplements
+        }
+        
         setupCamera()
         setupUI()
     }
@@ -131,16 +146,21 @@ class ScannerVC: UIViewController {
             return
         }
         
-        // Setup metadata output for continuous barcode detection
-        let metadataOutput = AVCaptureMetadataOutput()
-        if session.canAddOutput(metadataOutput) {
-            session.addOutput(metadataOutput)
-            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-            metadataOutput.metadataObjectTypes = [.ean13, .ean8, .upce, .code128, .code39, .code93]
-            self.metadataOutput = metadataOutput
+        // Setup metadata output for continuous barcode detection (only for groceries mode)
+        if scannerMode == .groceries {
+            let metadataOutput = AVCaptureMetadataOutput()
+            if session.canAddOutput(metadataOutput) {
+                session.addOutput(metadataOutput)
+                metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+                metadataOutput.metadataObjectTypes = [.ean13, .ean8, .upce, .code128, .code39, .code93]
+                self.metadataOutput = metadataOutput
+            } else {
+                print("Scanner: Cannot add metadata output")
+                return
+            }
         } else {
-            print("Scanner: Cannot add metadata output")
-            return
+            // Supplements mode: skip barcode detection
+            self.metadataOutput = nil
         }
         
         captureSession = session
@@ -156,8 +176,9 @@ class ScannerVC: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        // Set metadata output rect of interest after preview layer is set up
-        if let metadataOutput = self.metadataOutput,
+        // Set metadata output rect of interest after preview layer is set up (only for groceries)
+        if scannerMode == .groceries,
+           let metadataOutput = self.metadataOutput,
            let previewLayer = self.previewLayer {
             // Set rect of interest to full screen (normalized coordinates)
             metadataOutput.rectOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -179,7 +200,7 @@ class ScannerVC: UIViewController {
         view.addSubview(container)
         self.buttonContainer = container
         
-        // Capture button - initially hidden, shown when front label capture is needed
+        // Capture button - initially hidden for groceries, shown immediately for supplements
         let captureButton = UIButton(type: .system)
         captureButton.setTitle("Capture Label", for: .normal)
         captureButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -187,7 +208,8 @@ class ScannerVC: UIViewController {
         captureButton.layer.cornerRadius = 12
         captureButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         captureButton.addTarget(self, action: #selector(captureTapped), for: .touchUpInside)
-        captureButton.isHidden = true // Hidden initially, shown when barcode is detected
+        // Show immediately for supplements mode, hidden for groceries (shown after barcode detected)
+        captureButton.isHidden = (scannerMode == .groceries)
         container.addSubview(captureButton)
         self.captureButton = captureButton
         
@@ -218,7 +240,8 @@ class ScannerVC: UIViewController {
         promptLabel.numberOfLines = 0
         promptLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
         promptLabel.layer.cornerRadius = 12
-        promptLabel.isHidden = true
+        // Show immediately for supplements mode, hidden for groceries (shown after barcode detected)
+        promptLabel.isHidden = (scannerMode == .groceries)
         promptLabel.layer.masksToBounds = true
         view.addSubview(promptLabel)
         self.promptLabel = promptLabel
@@ -805,6 +828,8 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
 
 extension ScannerVC: AVCaptureMetadataOutputObjectsDelegate {
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        // Only process barcodes in groceries mode
+        guard scannerMode == .groceries else { return }
         // Only process if we're in scanning state
         guard currentState == .scanningBarcode else { return }
         

@@ -93,11 +93,81 @@ struct SupplementsView: View {
                         // Track supplement to meal tracker if needed
                         // Only save if front label image was captured (required for grid display)
                         if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                            // CRITICAL: Copy suggestions from existing cache entry before saving
+                            var analysisToSave = analysis
+                            
+                            // Try to get suggestions from the existing cache entry (by currentImageHash or foodName)
+                            if let currentHash = currentImageHash,
+                               let existingEntry = foodCacheManager.cachedAnalyses.first(where: { $0.imageHash == currentHash }),
+                               let existingSuggestions = existingEntry.fullAnalysis.suggestions,
+                               !existingSuggestions.isEmpty {
+                                // Copy suggestions from existing entry
+                                analysisToSave = FoodAnalysis(
+                                    foodName: analysis.foodName,
+                                    overallScore: analysis.overallScore,
+                                    summary: analysis.summary,
+                                    healthScores: analysis.healthScores,
+                                    keyBenefits: analysis.keyBenefits,
+                                    ingredients: analysis.ingredients,
+                                    bestPreparation: analysis.bestPreparation,
+                                    servingSize: analysis.servingSize,
+                                    nutritionInfo: analysis.nutritionInfo,
+                                    scanType: analysis.scanType,
+                                    foodNames: analysis.foodNames,
+                                    suggestions: existingSuggestions, // Copy suggestions!
+                                    dataCompleteness: analysis.dataCompleteness,
+                                    analysisTimestamp: analysis.analysisTimestamp,
+                                    dataSource: analysis.dataSource,
+                                    ingredientAnalyses: analysis.ingredientAnalyses,
+                                    drugInteractions: analysis.drugInteractions,
+                                    overallResearchScore: analysis.overallResearchScore,
+                                    secondaryDetails: analysis.secondaryDetails,
+                                    healthGoalsEvaluation: analysis.healthGoalsEvaluation
+                                )
+                                print("📦 SUPPLEMENT: Copied \(existingSuggestions.count) suggestions from existing cache entry (onTrack)")
+                            } else if let existingSuggestions = analysis.suggestions, !existingSuggestions.isEmpty {
+                                print("📦 SUPPLEMENT: Analysis already has \(existingSuggestions.count) suggestions (onTrack)")
+                            } else {
+                                // Try to find by foodName as fallback
+                                let normalizedName = FoodAnalysis.normalizeInput(analysis.foodName)
+                                if let existingEntry = foodCacheManager.cachedAnalyses.first(where: { 
+                                    FoodAnalysis.normalizeInput($0.foodName) == normalizedName && 
+                                    $0.fullAnalysis.suggestions != nil && 
+                                    !($0.fullAnalysis.suggestions?.isEmpty ?? true)
+                                }) {
+                                    if let existingSuggestions = existingEntry.fullAnalysis.suggestions {
+                                        analysisToSave = FoodAnalysis(
+                                            foodName: analysis.foodName,
+                                            overallScore: analysis.overallScore,
+                                            summary: analysis.summary,
+                                            healthScores: analysis.healthScores,
+                                            keyBenefits: analysis.keyBenefits,
+                                            ingredients: analysis.ingredients,
+                                            bestPreparation: analysis.bestPreparation,
+                                            servingSize: analysis.servingSize,
+                                            nutritionInfo: analysis.nutritionInfo,
+                                            scanType: analysis.scanType,
+                                            foodNames: analysis.foodNames,
+                                            suggestions: existingSuggestions, // Copy suggestions!
+                                            dataCompleteness: analysis.dataCompleteness,
+                                            analysisTimestamp: analysis.analysisTimestamp,
+                                            dataSource: analysis.dataSource,
+                                            ingredientAnalyses: analysis.ingredientAnalyses,
+                                            drugInteractions: analysis.drugInteractions,
+                                            overallResearchScore: analysis.overallResearchScore,
+                                            secondaryDetails: analysis.secondaryDetails,
+                                            healthGoalsEvaluation: analysis.healthGoalsEvaluation
+                                        )
+                                        print("📦 SUPPLEMENT: Copied \(existingSuggestions.count) suggestions from entry found by foodName (onTrack)")
+                                    }
+                                }
+                            }
+                            
                             // Store front label image (this is what appears in the grid)
                             foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
-                            // Cache analysis with front label image hash for grid display
-                            foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
-                            print("SupplementsView: Saved analysis with front label image to grid")
+                            // Cache analysis with front label image hash for grid display (now includes suggestions)
+                            foodCacheManager.cacheAnalysis(analysisToSave, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                            print("📦 SUPPLEMENT: Saved analysis with front label image to grid (onTrack, has suggestions: \(analysisToSave.suggestions?.count ?? 0))")
                         } else {
                             print("SupplementsView: Cannot save - front label image not captured yet")
                         }
@@ -111,11 +181,84 @@ struct SupplementsView: View {
                         // Save supplement analysis - use front label image for grid display
                         // Only save if front label image was captured (required for grid display)
                         if let analysis = scanResultAnalysis, let frontLabel = frontLabelImage, let frontLabelHash = frontLabelImageHash {
+                            // CRITICAL: Copy suggestions from existing cache entry before saving
+                            // The analysis was cached with imageHash (facts image), but suggestions were added later
+                            // We need to preserve those suggestions when creating the new entry with frontLabelHash
+                            var analysisToSave = analysis
+                            
+                            // Try to get suggestions from the existing cache entry (by currentImageHash or foodName)
+                            if let currentHash = currentImageHash,
+                               let existingEntry = foodCacheManager.cachedAnalyses.first(where: { $0.imageHash == currentHash }),
+                               let existingSuggestions = existingEntry.fullAnalysis.suggestions,
+                               !existingSuggestions.isEmpty {
+                                // Copy suggestions from existing entry
+                                analysisToSave = FoodAnalysis(
+                                    foodName: analysis.foodName,
+                                    overallScore: analysis.overallScore,
+                                    summary: analysis.summary,
+                                    healthScores: analysis.healthScores,
+                                    keyBenefits: analysis.keyBenefits,
+                                    ingredients: analysis.ingredients,
+                                    bestPreparation: analysis.bestPreparation,
+                                    servingSize: analysis.servingSize,
+                                    nutritionInfo: analysis.nutritionInfo,
+                                    scanType: analysis.scanType,
+                                    foodNames: analysis.foodNames,
+                                    suggestions: existingSuggestions, // Copy suggestions!
+                                    dataCompleteness: analysis.dataCompleteness,
+                                    analysisTimestamp: analysis.analysisTimestamp,
+                                    dataSource: analysis.dataSource,
+                                    ingredientAnalyses: analysis.ingredientAnalyses,
+                                    drugInteractions: analysis.drugInteractions,
+                                    overallResearchScore: analysis.overallResearchScore,
+                                    secondaryDetails: analysis.secondaryDetails,
+                                    healthGoalsEvaluation: analysis.healthGoalsEvaluation
+                                )
+                                print("📦 SUPPLEMENT: Copied \(existingSuggestions.count) suggestions from existing cache entry")
+                            } else if let existingSuggestions = analysis.suggestions, !existingSuggestions.isEmpty {
+                                // Analysis already has suggestions (loaded synchronously)
+                                print("📦 SUPPLEMENT: Analysis already has \(existingSuggestions.count) suggestions")
+                            } else {
+                                // Try to find by foodName as fallback
+                                let normalizedName = FoodAnalysis.normalizeInput(analysis.foodName)
+                                if let existingEntry = foodCacheManager.cachedAnalyses.first(where: { 
+                                    FoodAnalysis.normalizeInput($0.foodName) == normalizedName && 
+                                    $0.fullAnalysis.suggestions != nil && 
+                                    !($0.fullAnalysis.suggestions?.isEmpty ?? true)
+                                }) {
+                                    if let existingSuggestions = existingEntry.fullAnalysis.suggestions {
+                                        analysisToSave = FoodAnalysis(
+                                            foodName: analysis.foodName,
+                                            overallScore: analysis.overallScore,
+                                            summary: analysis.summary,
+                                            healthScores: analysis.healthScores,
+                                            keyBenefits: analysis.keyBenefits,
+                                            ingredients: analysis.ingredients,
+                                            bestPreparation: analysis.bestPreparation,
+                                            servingSize: analysis.servingSize,
+                                            nutritionInfo: analysis.nutritionInfo,
+                                            scanType: analysis.scanType,
+                                            foodNames: analysis.foodNames,
+                                            suggestions: existingSuggestions, // Copy suggestions!
+                                            dataCompleteness: analysis.dataCompleteness,
+                                            analysisTimestamp: analysis.analysisTimestamp,
+                                            dataSource: analysis.dataSource,
+                                            ingredientAnalyses: analysis.ingredientAnalyses,
+                                            drugInteractions: analysis.drugInteractions,
+                                            overallResearchScore: analysis.overallResearchScore,
+                                            secondaryDetails: analysis.secondaryDetails,
+                                            healthGoalsEvaluation: analysis.healthGoalsEvaluation
+                                        )
+                                        print("📦 SUPPLEMENT: Copied \(existingSuggestions.count) suggestions from entry found by foodName")
+                                    }
+                                }
+                            }
+                            
                             // Store front label image (this is what appears in the grid)
                             foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
-                            // Cache analysis with front label image hash for grid display
-                            foodCacheManager.cacheAnalysis(analysis, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
-                            print("SupplementsView: Saved analysis with front label image to grid")
+                            // Cache analysis with front label image hash for grid display (now includes suggestions)
+                            foodCacheManager.cacheAnalysis(analysisToSave, imageHash: frontLabelHash, scanType: scanType.rawValue, inputMethod: nil)
+                            print("📦 SUPPLEMENT: Saved analysis with front label image to grid (has suggestions: \(analysisToSave.suggestions?.count ?? 0))")
                         } else {
                             print("SupplementsView: Cannot save - front label image not captured yet")
                         }

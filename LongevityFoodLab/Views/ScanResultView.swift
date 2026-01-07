@@ -323,8 +323,16 @@ struct ScanResultView: View {
                             
                             // Combined Health Goals + Healthier Choices (ALWAYS RENDERS because Health Goals has content)
                             VStack(spacing: 16) {
-                                // Health Goals Section (always renders - has content)
-                                healthGoalsSection(analysis: analysis)
+                                // Health Goals Section
+                                if isSupplementScan {
+                                    // For supplements: Show health goals evaluation icons
+                                    if let evaluations = analysis.healthGoalsEvaluation, !evaluations.isEmpty {
+                                        supplementHealthGoalsIcons(evaluations: evaluations)
+                                    }
+                                } else {
+                                    // For groceries/meals: Show regular health goals section
+                                    healthGoalsSection(analysis: analysis)
+                                }
                                 
                                 // Healthier Choices Section (part of same VStack, so modifiers always fire)
                                 VStack(alignment: .leading, spacing: 12) {
@@ -339,7 +347,7 @@ struct ScanResultView: View {
                                         .padding(.vertical, 12)
                                         .frame(maxWidth: .infinity)
                                     } else if !grocerySuggestions.isEmpty {
-                                        Text("Healthier Choices:")
+                                        Text("Higher Scoring Supplements:")
                                             .font(.headline)
                                             .fontWeight(.semibold)
                                             .foregroundColor(.primary)
@@ -353,11 +361,6 @@ struct ScanResultView: View {
                                         }
                                     }
                                     // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
-                                }
-                                
-                                // Health Goals icons for supplements (simple display, no dropdowns)
-                                if isSupplementScan, let evaluations = analysis.healthGoalsEvaluation, !evaluations.isEmpty {
-                                    supplementHealthGoalsIcons(evaluations: evaluations)
                                 }
                             }
                             .onAppear {
@@ -1143,9 +1146,10 @@ struct ScanResultView: View {
             
             // Reason for higher score
             Text(suggestion.reason)
-                .font(.caption)
-                .foregroundColor(.primary)
-                .lineLimit(2)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
             
             // Key benefits
             if !suggestion.keyBenefits.isEmpty {
@@ -1387,10 +1391,11 @@ struct ScanResultView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             VStack(alignment: .leading, spacing: 6) {
+                // Show ALL evaluations (not just some)
                 ForEach(evaluations) { eval in
                     HStack(spacing: 8) {
-                        Image(systemName: eval.status == "supports" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(eval.status == "supports" ? .green : .orange)
+                        Image(systemName: iconForStatus(score: eval.score))
+                            .foregroundColor(colorForStatus(score: eval.score))
                             .font(.system(size: 16))
                         Text(eval.goal)
                             .font(.subheadline)
@@ -1400,6 +1405,27 @@ struct ScanResultView: View {
             }
         }
         .padding(.top, 8)
+    }
+    
+    // Helper functions for icon and color based on score thresholds
+    private func iconForStatus(score: Int) -> String {
+        if score >= 60 {
+            return "checkmark.circle.fill"  // ✅ Supports
+        } else if score >= 40 {
+            return "exclamationmark.triangle.fill"  // ⚠️ Limited
+        } else {
+            return "xmark.circle.fill"  // ❌ Does not support
+        }
+    }
+    
+    private func colorForStatus(score: Int) -> Color {
+        if score >= 60 {
+            return .green
+        } else if score >= 40 {
+            return .orange
+        } else {
+            return .red
+        }
     }
 }
 

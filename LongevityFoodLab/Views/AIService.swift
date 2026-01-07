@@ -1321,26 +1321,42 @@ extension AIService {
         let healthGoalsText = healthGoals.isEmpty ? "general health" : healthGoals.joined(separator: ", ")
         
         let prompt = """
-        You are a supplement and nutrition expert. Find 2-3 similar supplement products that would have HIGHER scores than the current supplement.
+        You are a supplement and nutrition expert. Find 2-3 HIGHER SCORING alternatives for this supplement.
         
-        Current Supplement: \(currentSupplement)
-        Current Score: \(currentScore)/100
+        SCANNED SUPPLEMENT:
+        Name: \(currentSupplement)
+        Score: \(currentScore)
         User's Health Goals: \(healthGoalsText)
         
-        Find similar supplement products that:
-        1. Are in the same category (e.g., multivitamin, omega-3, vitamin D, probiotics, etc.)
-        2. Would score 10-30 points higher than the current supplement
-        3. Are widely available in the US market (health stores, online retailers like Amazon, iHerb, etc.)
-        4. Have better ingredient quality, bioavailability, and purity
+        CRITICAL: Identify the supplement CATEGORY and suggest alternatives in the SAME category.
+        
+        Common categories:
+        - Prostate health (saw palmetto, beta-sitosterol, pygeum, lycopene)
+        - Heart/cardiovascular (CoQ10, omega-3, fish oil, hawthorn)
+        - Brain/cognitive (lion's mane, ginkgo, phosphatidylserine, bacopa)
+        - Joint health (glucosamine, chondroitin, MSM, turmeric)
+        - Sleep (melatonin, magnesium, valerian, L-theanine)
+        - Liver/detox (NAC, milk thistle, glutathione, dandelion)
+        - Multivitamin (broad spectrum vitamins/minerals)
+        - Energy (B vitamins, iron, adaptogenics, rhodiola)
+        - Immune (vitamin C, zinc, elderberry, echinacea)
+        - Digestive (probiotics, enzymes, fiber, digestive bitters)
+        - Bone health (calcium, vitamin D, magnesium, K2)
+        - Skin/hair (collagen, biotin, hyaluronic acid)
+        - Eye health (lutein, zeaxanthin, bilberry)
+        
+        Determine which category this supplement belongs to based on its name and ingredients.
+        Then suggest 2-3 alternatives in the SAME CATEGORY with scores HIGHER than \(currentScore).
         
         Respond in this exact JSON format:
         {
+          "category": "identified category (e.g., Prostate health, Heart/cardiovascular, Brain/cognitive)",
           "suggestions": [
             {
               "brandName": "Brand name",
               "productName": "Product name",
               "score": 85,
-              "reason": "This supplement scores higher due to its use of high-quality ingredients and inclu...",
+              "reason": "Brief reason it scores higher (50-70 characters max)",
               "keyBenefits": ["Benefit 1", "Benefit 2", "Benefit 3"],
               "priceRange": "$X-$Y per bottle",
               "availability": "Widely available at health stores and online"
@@ -1349,7 +1365,7 @@ extension AIService {
               "brandName": "Brand name",
               "productName": "Product name",
               "score": 88,
-              "reason": "Offers a balanced nutrition profile with high-quality ingredients and easily digestible...",
+              "reason": "Brief reason it scores higher (50-70 characters max)",
               "keyBenefits": ["Benefit 1", "Benefit 2", "Benefit 3"],
               "priceRange": "$X-$Y per bottle",
               "availability": "Widely available at health stores and online"
@@ -1358,11 +1374,14 @@ extension AIService {
         }
         
         REQUIREMENTS:
+        - MUST identify the correct category based on supplement name and typical ingredients
+        - MUST suggest alternatives in the SAME category (e.g., prostate supplements should suggest other prostate supplements)
         - MUST include REAL supplement brand names (e.g., "Thorne", "Garden of Life", "NOW Foods", "Nature Made", "Solgar", "Nordic Naturals", "Jarrow Formulas", "Life Extension", "Doctor's Best", "Country Life", "MegaFood", "New Chapter", "Rainbow Light", "SmartyPants", "Ritual")
+        - Scores must be HIGHER than \(currentScore)
         - keyBenefits should be 2-4 items highlighting specific advantages
         - priceRange should be realistic for US market (e.g., "$15-$25 per bottle", "$20-$30 per bottle")
         - availability should mention "health stores and online" or "widely available at health stores and online"
-        - reason should explain why this supplement scores higher (2 sentences max, can be truncated)
+        - reason should be 50-70 characters max explaining why it scores higher
         
         Base your suggestions on real supplement brands and products available in the US market. Focus on products that genuinely offer better quality, bioavailability, and ingredient purity.
         """

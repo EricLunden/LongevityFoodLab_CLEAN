@@ -119,9 +119,12 @@ class ScannerVC: UIViewController {
         setupCamera()
         setupUI()
         
-        // Update supplement UI if in supplements mode
+        // Update UI based on mode
         if scannerMode == .supplements {
             updateSupplementUI()
+        } else if scannerMode == .groceries {
+            // Initialize grocery UI - show barcode instruction banner
+            transitionToState(.scanningBarcode)
         }
     }
     
@@ -257,7 +260,7 @@ class ScannerVC: UIViewController {
         // Prompt label for front label capture - moved to top
         let promptLabel = UILabel()
         promptLabel.text = "Take A Photo Of The Front Label For Reference"
-        promptLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        promptLabel.font = .systemFont(ofSize: 19, weight: .semibold)
         promptLabel.textColor = .white
         promptLabel.textAlignment = .center
         promptLabel.numberOfLines = 0
@@ -371,8 +374,8 @@ class ScannerVC: UIViewController {
         // Update prompt label position - moved to top
         if let promptLabel = promptLabel {
             let promptWidth = view.bounds.width - 40
-            // Increased height for comfortable padding - 80 for both single and multi-line
-            let promptHeight: CGFloat = 80
+            // Height: 80 for supplements (multi-line), 60 for groceries (single-line)
+            let promptHeight: CGFloat = (scannerMode == .supplements) ? 80 : 60
             let topPadding: CGFloat = 60 // Safe area + padding
             promptLabel.frame = CGRect(
                 x: 20,
@@ -385,7 +388,7 @@ class ScannerVC: UIViewController {
             promptLabel.numberOfLines = 0 // Allow multiple lines
             promptLabel.layer.masksToBounds = true
             
-            // Apply gradient after frame is set (for supplements mode)
+            // Apply gradient after frame is set (for supplements and groceries)
             // This ensures label.bounds is correct when gradient is created
             if scannerMode == .supplements {
                 // Ensure text is white and visible before applying gradient
@@ -404,6 +407,30 @@ class ScannerVC: UIViewController {
                         UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
                     ])
                 } else if supplementPhase == .supplementFacts {
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                        UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                    ])
+                }
+            } else if scannerMode == .groceries {
+                // For groceries: Apply gradient based on current state (apply even if label is hidden initially)
+                promptLabel.textColor = .white
+                promptLabel.backgroundColor = .clear
+                
+                // Always remove existing gradient view and recreate with correct colors for current state
+                if let gradientView = promptLabel.superview?.subviews.first(where: { $0.tag == 9999 }) {
+                    gradientView.removeFromSuperview()
+                }
+                
+                // Create gradient with correct colors for current state
+                if currentState == .scanningBarcode {
+                    // Orange/red gradient for barcode scanning
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                        UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                    ])
+                } else if currentState == .capturingFrontLabel {
+                    // Blue/green gradient for label capture
                     applyGradientToLabel(promptLabel, colors: [
                         UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
                         UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
@@ -475,7 +502,7 @@ class ScannerVC: UIViewController {
             // Set text first
             promptLabel?.text = "Photograph the FRONT of the bottle"
             promptLabel?.textColor = .white
-            promptLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+            promptLabel?.font = .systemFont(ofSize: 19, weight: .semibold)
             promptLabel?.textAlignment = .center
             promptLabel?.numberOfLines = 0
             captureButton?.setTitle("Capture Front", for: .normal)
@@ -838,8 +865,33 @@ class ScannerVC: UIViewController {
             switch newState {
             case .scanningBarcode:
                 self.captureButton?.isHidden = true
-                self.promptLabel?.isHidden = true
                 self.cancelButton?.isHidden = false
+                
+                // For groceries: Show instruction banner with orange/red gradient
+                if self.scannerMode == .groceries {
+                    self.promptLabel?.isHidden = false
+                    self.promptLabel?.text = "Scan The Barcode"
+                    self.promptLabel?.textColor = .white
+                    self.promptLabel?.textAlignment = .center
+                    self.promptLabel?.numberOfLines = 0
+                    self.promptLabel?.backgroundColor = .clear
+                    
+                    // Apply orange/red gradient (same as supplement front label)
+                    if let promptLabel = self.promptLabel {
+                        self.applyGradientToLabel(promptLabel, colors: [
+                            UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                            UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                        ])
+                    }
+                } else {
+                    // Supplements: keep hidden
+                    self.promptLabel?.isHidden = true
+                }
+                
+                // Trigger layout update to ensure gradient is applied
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
+                
                 self.updateScanningOverlay()
                 
             case .barcodeDetected:
@@ -858,6 +910,25 @@ class ScannerVC: UIViewController {
                 self.promptLabel?.isHidden = false
                 self.cancelButton?.isHidden = false
                 self.cancelButton?.isEnabled = true
+                
+                // For groceries: Update instruction banner with blue/green gradient
+                if self.scannerMode == .groceries {
+                    self.promptLabel?.text = "Now Scan The Front Label"
+                    self.promptLabel?.textColor = .white
+                    self.promptLabel?.textAlignment = .center
+                    self.promptLabel?.numberOfLines = 0
+                    self.promptLabel?.backgroundColor = .clear
+                    
+                    // Apply blue/green gradient (same as supplement facts)
+                    if let promptLabel = self.promptLabel {
+                        self.applyGradientToLabel(promptLabel, colors: [
+                            UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                            UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                        ])
+                    }
+                }
+                // For supplements: text and gradient already set by updateSupplementUI()
+                
                 // Update layout to show stacked buttons
                 self.viewDidLayoutSubviews()
                 // Ensure button container and buttons are on top and visible

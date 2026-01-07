@@ -142,6 +142,28 @@ class FoodCacheManager: ObservableObject {
         print("🔍 FoodCacheManager: Analysis deleted. Cache now contains \(cachedAnalyses.count) analyses")
     }
     
+    /// Removes a cached analysis by its image hash
+    /// Used when replacing an entry with a different image hash (e.g., supplement save)
+    func removeCachedAnalysis(byImageHash hash: String) {
+        guard !hash.isEmpty else { return }
+        
+        let countBefore = cachedAnalyses.count
+        
+        // Remove from in-memory cache
+        cachedAnalyses.removeAll { $0.imageHash == hash }
+        
+        // Delete associated image from disk
+        deleteImage(forHash: hash)
+        
+        let countAfter = cachedAnalyses.count
+        
+        if countBefore != countAfter {
+            // Save updated cache to disk
+            saveToPersistentStorage()
+            print("🔍 FoodCacheManager: Removed entry with imageHash: \(hash.prefix(16))..., cache now contains \(countAfter) analyses")
+        }
+    }
+    
     func clearAllAnalyses() {
         cachedAnalyses.removeAll()
         saveToPersistentStorage()
@@ -244,6 +266,14 @@ class FoodCacheManager: ObservableObject {
         
         guard let imageData = try? Data(contentsOf: imageURL) else { return nil }
         return UIImage(data: imageData)
+    }
+    
+    func deleteImage(forHash imageHash: String) {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let imageURL = documentsPath.appendingPathComponent("GroceryScanImages/\(imageHash).jpg")
+        
+        try? FileManager.default.removeItem(at: imageURL)
+        print("🔍 FoodCacheManager: Deleted image file for hash: \(imageHash.prefix(16))...")
     }
     
     // MARK: - Cache Key Generation

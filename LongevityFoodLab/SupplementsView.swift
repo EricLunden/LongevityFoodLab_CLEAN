@@ -163,6 +163,12 @@ struct SupplementsView: View {
                                 }
                             }
                             
+                            // NEW: Delete the ORIGINAL entry (facts hash) before saving new one (front label hash)
+                            if let originalHash = currentImageHash, !originalHash.isEmpty {
+                                foodCacheManager.removeCachedAnalysis(byImageHash: originalHash)
+                                print("📦 SUPPLEMENT: Removed original cache entry with facts hash: \(originalHash.prefix(16))...")
+                            }
+                            
                             // Store front label image (this is what appears in the grid)
                             foodCacheManager.saveImage(frontLabel, forHash: frontLabelHash)
                             // Cache analysis with front label image hash for grid display (now includes suggestions)
@@ -252,6 +258,12 @@ struct SupplementsView: View {
                                         print("📦 SUPPLEMENT: Copied \(existingSuggestions.count) suggestions from entry found by foodName")
                                     }
                                 }
+                            }
+                            
+                            // NEW: Delete the ORIGINAL entry (facts hash) before saving new one (front label hash)
+                            if let originalHash = currentImageHash, !originalHash.isEmpty {
+                                foodCacheManager.removeCachedAnalysis(byImageHash: originalHash)
+                                print("📦 SUPPLEMENT: Removed original cache entry with facts hash: \(originalHash.prefix(16))...")
                             }
                             
                             // Store front label image (this is what appears in the grid)

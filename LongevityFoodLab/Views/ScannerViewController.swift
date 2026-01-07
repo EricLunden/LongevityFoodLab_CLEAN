@@ -392,26 +392,22 @@ class ScannerVC: UIViewController {
                 promptLabel.textColor = .white
                 promptLabel.backgroundColor = .clear
                 
-                // Update gradient background view frame to match label
+                // Always remove existing gradient view and recreate with correct colors for current phase
                 if let gradientView = promptLabel.superview?.subviews.first(where: { $0.tag == 9999 }) {
-                    // Update existing gradient view frame
-                    gradientView.frame = promptLabel.frame
-                    if let gradientLayer = gradientView.layer.sublayers?.first as? CAGradientLayer {
-                        gradientLayer.frame = gradientView.bounds
-                    }
-                } else {
-                    // Create gradient if it doesn't exist
-                    if supplementPhase == .frontLabel {
-                        applyGradientToLabel(promptLabel, colors: [
-                            UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
-                            UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
-                        ])
-                    } else if supplementPhase == .supplementFacts {
-                        applyGradientToLabel(promptLabel, colors: [
-                            UIColor(red: 0.05, green: 0.5, blue: 0.05, alpha: 1.0).cgColor,  // Darker green
-                            UIColor(red: 0.6, green: 0.5, blue: 0.0, alpha: 1.0).cgColor   // Darker yellow/olive
-                        ])
-                    }
+                    gradientView.removeFromSuperview()
+                }
+                
+                // Create gradient with correct colors for current phase
+                if supplementPhase == .frontLabel {
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                        UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                    ])
+                } else if supplementPhase == .supplementFacts {
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                        UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                    ])
                 }
             }
         }
@@ -483,7 +479,13 @@ class ScannerVC: UIViewController {
             promptLabel?.textAlignment = .center
             promptLabel?.numberOfLines = 0
             captureButton?.setTitle("Capture Front", for: .normal)
-            // Gradient will be applied in viewDidLayoutSubviews when frame is set
+            // Apply red/orange gradient immediately
+            if let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                    UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                ])
+            }
             
         case .supplementFacts:
             // Add line spacing for multi-line text with white color and center alignment
@@ -500,7 +502,13 @@ class ScannerVC: UIViewController {
             promptLabel?.textAlignment = .center
             promptLabel?.numberOfLines = 0
             captureButton?.setTitle("Capture Supplement Facts", for: .normal)
-            // Gradient will be applied in viewDidLayoutSubviews when frame is set
+            // Apply blue/green gradient immediately
+            if let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                    UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                ])
+            }
         }
     }
     
@@ -513,10 +521,13 @@ class ScannerVC: UIViewController {
         // Ensure layout is complete before applying gradient
         label.layoutIfNeeded()
         
-        // Remove any existing gradient background view
-        if let gradientView = label.superview?.subviews.first(where: { $0.tag == 9999 }) {
-            gradientView.removeFromSuperview()
-        }
+        // Remove ALL existing gradient background views (not just first one)
+        label.superview?.subviews
+            .filter { $0.tag == 9999 }
+            .forEach { 
+                print("🔍 Removing existing gradient view")
+                $0.removeFromSuperview() 
+            }
         
         // Remove existing gradient layers from label itself
         label.layer.sublayers?.forEach { layer in
@@ -566,8 +577,22 @@ class ScannerVC: UIViewController {
             frontLabelImage = image
             supplementPhase = .supplementFacts
             updateSupplementUI()
+            
+            // Apply blue/green gradient immediately after phase change
+            if supplementPhase == .supplementFacts, let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                    UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                ])
+            }
+            
             // Update overlay for facts phase
             updateScanningOverlay()
+            
+            // Force layout update to ensure gradient is visible
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            
             // Stay in scanner for second capture
             
         case .supplementFacts:

@@ -45,6 +45,9 @@ struct FoodAnalysis: Codable, Equatable {
     // Lazy-loaded secondary details (populated on demand)
     var secondaryDetails: SupplementSecondaryDetails? // Dosage, safety, quality — loaded on tap
     
+    // Health goals evaluation (for supplements)
+    let healthGoalsEvaluation: [HealthGoalEvaluation]?
+    
     // Data completeness and source tracking (optional for backward compatibility)
     let dataCompleteness: DataCompleteness?
     let analysisTimestamp: Date?
@@ -201,7 +204,8 @@ struct FoodAnalysis: Codable, Equatable {
             ingredientAnalyses: ingredientAnalyses,
             drugInteractions: drugInteractions,
             overallResearchScore: overallResearchScore,
-            secondaryDetails: secondaryDetails
+            secondaryDetails: secondaryDetails,
+            healthGoalsEvaluation: healthGoalsEvaluation
         )
     }
     
@@ -232,6 +236,7 @@ struct FoodAnalysis: Codable, Equatable {
         drugInteractions = try container.decodeIfPresent([DrugInteraction].self, forKey: .drugInteractions)
         overallResearchScore = try container.decodeIfPresent(Int.self, forKey: .overallResearchScore)
         secondaryDetails = try container.decodeIfPresent(SupplementSecondaryDetails.self, forKey: .secondaryDetails)
+        healthGoalsEvaluation = try container.decodeIfPresent([HealthGoalEvaluation].self, forKey: .healthGoalsEvaluation)
     }
     
     // Custom encoder
@@ -257,6 +262,7 @@ struct FoodAnalysis: Codable, Equatable {
         try container.encodeIfPresent(drugInteractions, forKey: .drugInteractions)
         try container.encodeIfPresent(overallResearchScore, forKey: .overallResearchScore)
         try container.encodeIfPresent(secondaryDetails, forKey: .secondaryDetails)
+        try container.encodeIfPresent(healthGoalsEvaluation, forKey: .healthGoalsEvaluation)
     }
     
     enum CodingKeys: String, CodingKey {
@@ -279,6 +285,7 @@ struct FoodAnalysis: Codable, Equatable {
         case drugInteractions
         case overallResearchScore
         case secondaryDetails
+        case healthGoalsEvaluation
     }
     
     // Regular initializer
@@ -301,7 +308,8 @@ struct FoodAnalysis: Codable, Equatable {
         ingredientAnalyses: [IngredientAnalysis]? = nil,
         drugInteractions: [DrugInteraction]? = nil,
         overallResearchScore: Int? = nil,
-        secondaryDetails: SupplementSecondaryDetails? = nil
+        secondaryDetails: SupplementSecondaryDetails? = nil,
+        healthGoalsEvaluation: [HealthGoalEvaluation]? = nil
     ) {
         self.foodName = foodName
         self.overallScore = overallScore
@@ -322,6 +330,7 @@ struct FoodAnalysis: Codable, Equatable {
         self.drugInteractions = drugInteractions
         self.overallResearchScore = overallResearchScore
         self.secondaryDetails = secondaryDetails
+        self.healthGoalsEvaluation = healthGoalsEvaluation
     }
 }
 
@@ -703,4 +712,31 @@ struct SupplementSecondaryDetails: Codable, Equatable {
     let dosageAnalyses: [DosageAnalysis]
     let safetyWarnings: [SafetyWarning]
     let qualityIndicators: [QualityIndicator]
+}
+
+/// Health goal evaluation for supplements
+struct HealthGoalEvaluation: Codable, Identifiable, Equatable {
+    let id: UUID
+    let goal: String           // "Heart health"
+    let status: String         // "supports", "limited", "none"
+    let score: Int             // 0-100
+    
+    init(id: UUID = UUID(), goal: String, status: String, score: Int) {
+        self.id = id
+        self.goal = goal
+        self.status = status
+        self.score = score
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()
+        goal = try container.decode(String.self, forKey: .goal)
+        status = try container.decode(String.self, forKey: .status)
+        score = try container.decode(Int.self, forKey: .score)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case goal, status, score
+    }
 }

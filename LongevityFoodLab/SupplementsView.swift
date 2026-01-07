@@ -463,7 +463,7 @@ struct SupplementsView: View {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30.0
+        request.timeoutInterval = 45.0
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Bearer \(SecureConfig.openAIAPIKey)", forHTTPHeaderField: "Authorization")
         
@@ -473,107 +473,90 @@ struct SupplementsView: View {
         let top3Goals = Array(healthGoals.prefix(3))
         let healthGoalsText = top3Goals.isEmpty ? "general health and longevity" : top3Goals.joined(separator: ", ")
         
-        // Enhanced prompt for Stage 2 - requests ingredientAnalyses and drugInteractions
+        print("📦 SUPPLEMENT: Sending simplified primary request")
+        
+        // Simplified prompt for fast response (8-12 seconds)
         let prompt = """
-        You are a precision nutrition analysis system. Analyze these supplement images and return ONLY valid JSON.
+        You are a precision supplement analysis system. Analyze these supplement images and return ONLY valid JSON.
 
         🚫 CRITICAL PROHIBITION:
         NEVER mention age, gender, or demographics. Use ONLY "your", "you", "your body", "your goals".
 
         IMAGE INSTRUCTIONS:
         - Image 1 is the FRONT of the supplement bottle - extract the product name and brand
-        - Image 2 is the SUPPLEMENT FACTS panel - extract ALL ingredients with exact amounts and forms
+        - Image 2 is the SUPPLEMENT FACTS panel - extract all ingredients with amounts
 
-        🚫 CRITICAL ACCURACY RULES:
-        - ONLY list ingredients that are VISIBLE on the Supplement Facts panel
-        - NEVER guess or assume ingredients that are not shown
-        - Include branded/trademarked ingredient names exactly as shown (e.g., "Crominex® 3+", "CalaMarine®", "Hydro Q-Sorb®")
-        - Include the specific form in parentheses if shown (e.g., "as ubiquinone", "as pyridoxine hydrochloride")
-        - Include exact amounts from the label with units (e.g., "100mg", "680mcg DFE")
+        🚫 ACCURACY RULES:
+        - ONLY list ingredients VISIBLE on the Supplement Facts panel
+        - NEVER guess or add ingredients not shown on label
+        - Include branded names if visible (e.g., "Hydro Q-Sorb®", "CalaMarine®", "Crominex® 3+")
+        - Include exact amounts with units (e.g., "100mg", "680mcg DFE")
         - If you cannot read an ingredient clearly, do NOT include it
-        - DO NOT add common supplements that are not on the label
 
-        RESEARCH SCORE CRITERIA (1-100):
-        Rate each ingredient based on quality and quantity of human research:
-        - 90-100 (Gold Standard): Large high-quality RCT OR meta-analysis with clear positive findings OR extensive research (10+ quality studies) + long safety history
-        - 75-89 (Strong Evidence): Multiple quality human studies with consistent results, OR one excellent RCT, OR centuries of traditional use + modern mechanistic understanding
-        - 60-74 (Good Evidence): Several small human studies with positive results + plausible mechanism + good safety profile
-        - 40-59 (Emerging Evidence): 1-2 small human studies with promising results, OR strong animal data + early human trials
-        - 20-39 (Limited Evidence): Animal/cell studies only, but strong mechanistic rationale
-        - 1-19 (Insufficient Evidence): Minimal research, theoretical benefits only
+        📝 SUMMARY REQUIREMENTS (RESEARCH-BASED):
+        Write a specific, research-based summary. Be precise about:
+        - Exact ingredient forms and WHY they matter (e.g., "ubiquinone form for enhanced absorption")
+        - Exact dosages compared to clinical ranges (e.g., "100mg is within the 100-200mg clinical range")
+        - Specific research claims (e.g., "shown to support mitochondrial function in heart tissue")
+        - What's good AND what's lacking (e.g., "Omega-3 dose is below the 1000-2000mg used in cardiovascular studies")
 
-        Quality factors that INCREASE score:
-        - Gold-standard RCT (double-blind, placebo-controlled)
-        - Meta-analysis or systematic review
-        - Long history of safe use (50+ years)
-        - Well-understood mechanism
-        - Large sample sizes (500+ participants)
-        - Replicated by independent labs
+        DO NOT write generic statements like:
+        - "provides strong support for heart health" ❌
+        - "may interact with certain medications" ❌
+        - "should be used with caution" ❌
 
-        Quality factors that DECREASE score:
-        - Only animal/cell studies
-        - Conflicting results
-        - Only small sample sizes
-        - Industry-funded only
-        - Short study durations
+        DO write specific statements like:
+        - "CoQ10 (100mg ubiquinone, Hydro Q-Sorb® form) is within the clinical range shown to support mitochondrial ATP production" ✅
+        - "Omega-3 dose (550mg) is below the 1000-2000mg typically used in cardiovascular outcome studies" ✅
 
-        DRUG INTERACTION RULES:
-        - List drug categories that may interact with ANY ingredient
-        - Include: category name, specific interaction risk, severity (moderate/serious)
-        - Common categories to check: Blood thinners, Statins, Blood pressure meds, Diabetes meds, Thyroid meds, Immunosuppressants, Antidepressants, Sedatives
-        - Only include interactions with clinical relevance
-        - If no known interactions, return empty array
+        🎯 HEALTH GOALS EVALUATION:
+        For each of the user's health goals (\(healthGoalsText)), evaluate if this supplement:
+        - ✅ Strongly supports (score 70+)
+        - ⚠️ Partially supports or has limitations (score 40-69)
+        - ❌ Does not support (score below 40)
 
         Return ONLY this JSON structure:
         {
             "scanType": "supplement",
             "foodName": "Product Name from front label",
             "overallScore": 0-100,
-            "summary": "Comprehensive analysis: 1) Product overview with key ingredients and amounts, 2) Ingredient form quality assessment, 3) Dosage evaluation vs clinical ranges, 4) Bioavailability considerations, 5) Strengths and benefits, 6) Weaknesses or concerns, 7) Any recalls or warnings, 8) Impact on health goals: \(healthGoalsText). Be thorough.",
+            "summary": "Research-based summary as described above. 3-4 sentences covering: 1) Key ingredients with forms and amounts, 2) How dosages compare to clinical ranges, 3) Specific benefits with research basis, 4) Any limitations or concerns. End with: No known recalls or safety hazards (or state if there are any).",
             "healthScores": {
-                "allergies": 0-100,
-                "antiInflammation": 0-100,
-                "bloodSugar": 0-100,
-                "brainHealth": 0-100,
-                "detoxLiver": 0-100,
-                "energy": 0-100,
-                "eyeHealth": 0-100,
                 "heartHealth": 0-100,
+                "brainHealth": 0-100,
+                "energy": 0-100,
+                "sleep": 0-100,
                 "immune": 0-100,
                 "jointHealth": 0-100,
-                "kidneys": 0-100,
+                "bloodSugar": 0-100,
+                "antiInflammation": 0-100,
                 "mood": 0-100,
-                "skin": 0-100,
-                "sleep": 0-100,
                 "stress": 0-100,
-                "weightManagement": 0-100
+                "skin": 0-100,
+                "eyeHealth": 0-100,
+                "detoxLiver": 0-100,
+                "kidneys": 0-100,
+                "weightManagement": 0-100,
+                "allergies": 0-100
             },
-            "servingSize": "From label",
-            "keyBenefits": ["benefit1", "benefit2", "benefit3"],
-            "ingredientAnalyses": [
-                {
-                    "name": "Full ingredient name with brand (e.g., Coenzyme Q10 (Hydro Q-Sorb®))",
-                    "amount": "100mg",
-                    "form": "ubiquinone",
-                    "researchScore": 92,
-                    "briefSummary": "One sentence about what this ingredient does"
-                }
+            "servingSize": "From label (e.g., 2 softgels)",
+            "ingredients": [
+                {"name": "CoQ10 (Hydro Q-Sorb®)", "amount": "100mg"},
+                {"name": "Omega-3 (CalaMarine®)", "amount": "550mg"}
             ],
-            "drugInteractions": [
-                {
-                    "drugCategory": "Blood Thinners (Warfarin, Aspirin)",
-                    "interaction": "May increase bleeding risk",
-                    "severity": "moderate"
-                }
-            ],
-            "overallResearchScore": 85
+            "healthGoalsEvaluation": [
+                {"goal": "Heart health", "status": "supports", "score": 92},
+                {"goal": "Brain health", "status": "supports", "score": 88},
+                {"goal": "Blood sugar control", "status": "limited", "score": 45}
+            ]
         }
 
         IMPORTANT:
-        - ingredientAnalyses must include EVERY ingredient from the Supplement Facts panel
-        - Each ingredient needs a researchScore based on the criteria above
-        - drugInteractions should only include clinically relevant interactions
-        - overallResearchScore is the weighted average of individual ingredient scores
+        - Keep response concise for speed
+        - Do NOT include research scores per ingredient (loaded separately)
+        - Do NOT include drug interactions (loaded separately)
+        - Do NOT include key benefits array (loaded separately)
+        - Focus on accurate ingredient extraction and SPECIFIC, RESEARCH-BASED summary
         """
         
         // Build message content with TWO images
@@ -668,15 +651,9 @@ struct SupplementsView: View {
         // Decode analysis with scanType
         var analysis = try JSONDecoder().decode(FoodAnalysis.self, from: analysisData)
         
-        // Log new data fields
-        print("📦 SUPPLEMENT: ingredientAnalyses count: \(analysis.ingredientAnalyses?.count ?? 0)")
-        print("📦 SUPPLEMENT: drugInteractions count: \(analysis.drugInteractions?.count ?? 0)")
-        print("📦 SUPPLEMENT: Overall research score: \(analysis.overallResearchScore ?? 0)")
-        if let ingredients = analysis.ingredientAnalyses {
-            for ing in ingredients {
-                print("  - \(ing.name): \(ing.researchScore) (\(ing.researchRating))")
-            }
-        }
+        print("📦 SUPPLEMENT: Primary analysis received")
+        print("📦 SUPPLEMENT: Ingredients count: \(analysis.ingredients?.count ?? 0)")
+        print("📦 SUPPLEMENT: Health goals evaluation count: \(analysis.healthGoalsEvaluation?.count ?? 0)")
         
         // If scanType wasn't in the decoded struct, add it manually
         if analysis.scanType == nil, let scanTypeString = scanTypeString {

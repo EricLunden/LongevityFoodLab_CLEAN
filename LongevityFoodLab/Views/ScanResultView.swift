@@ -35,14 +35,6 @@ struct ScanResultView: View {
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     
-    // Dropdown expansion state for supplements
-    @State private var isKeyBenefitsExpanded = false
-    @State private var isIngredientsExpanded = false
-    @State private var isDrugInteractionsExpanded = false
-    @State private var isDosageExpanded = false
-    @State private var isSafetyExpanded = false
-    @State private var isQualityExpanded = false
-    
     // Computed property to detect if displaying supplement
     var isSupplementScan: Bool {
         guard let analysis = analysis else { return false }
@@ -363,9 +355,9 @@ struct ScanResultView: View {
                                     // Note: Empty state shows nothing, but VStack still renders because Health Goals above ensures parent renders
                                 }
                                 
-                                // Supplement-specific dropdowns (only for supplements)
-                                if isSupplementScan {
-                                    supplementDropdowns(analysis: analysis)
+                                // Health Goals icons for supplements (simple display, no dropdowns)
+                                if isSupplementScan, let evaluations = analysis.healthGoalsEvaluation, !evaluations.isEmpty {
+                                    supplementHealthGoalsIcons(evaluations: evaluations)
                                 }
                             }
                             .onAppear {
@@ -1384,217 +1376,30 @@ struct ScanResultView: View {
         return dietaryPreference.lowercased().contains("keto")
     }
     
-    // MARK: - Supplement Dropdowns
+    // MARK: - Supplement Health Goals Icons (Simple Display)
     
-    private func supplementDropdowns(analysis: FoodAnalysis) -> some View {
-        VStack(spacing: 12) {
-            // Key Benefits dropdown
-            DisclosureGroup(isExpanded: $isKeyBenefitsExpanded) {
-                if !analysis.keyBenefitsOrDefault.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(analysis.keyBenefitsOrDefault, id: \.self) { benefit in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("✓")
-                                    .foregroundColor(Color(red: 0.42, green: 0.557, blue: 0.498))
-                                    .fontWeight(.bold)
-                                Text(benefit)
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                        }
-                    }
-                    .padding(.top, 8)
-                } else {
-                    Text("No key benefits listed.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 8)
-                }
-            } label: {
-                HStack {
-                    Text("🎯 Key Benefits")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isKeyBenefitsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+    private func supplementHealthGoalsIcons(evaluations: [HealthGoalEvaluation]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Health Goals:")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Ingredients Analysis dropdown (with research bars for supplements)
-            DisclosureGroup(isExpanded: $isIngredientsExpanded) {
-                if let ingredientAnalyses = analysis.ingredientAnalyses, !ingredientAnalyses.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(ingredientAnalyses) { ingredient in
-                            SupplementIngredientRow(ingredient: ingredient)
-                        }
-                    }
-                    .padding(.top, 8)
-                } else if !analysis.ingredientsOrDefault.isEmpty {
-                    // Fallback to regular ingredients display if ingredientAnalyses not available
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(analysis.ingredientsOrDefault.enumerated()), id: \.offset) { index, ingredient in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•")
-                                    .foregroundColor(.secondary)
-                                Text(ingredient.name)
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
-                            }
-                        }
-                    }
-                    .padding(.top, 8)
-                } else {
-                    Text("No ingredients listed.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 8)
-                }
-            } label: {
-                HStack {
-                    Text("🧪 Ingredients Analysis")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isIngredientsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Drug Interactions dropdown
-            DisclosureGroup(isExpanded: $isDrugInteractionsExpanded) {
-                if let drugInteractions = analysis.drugInteractions, !drugInteractions.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(drugInteractions) { interaction in
-                            DrugInteractionRow(interaction: interaction)
-                        }
-                        
-                        // Disclaimer
-                        Text("List is for information only and may not be complete. Always ask your doctor before taking any supplement regularly.")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .italic()
-                            .padding(.top, 8)
-                    }
-                    .padding(.top, 8)
-                } else {
-                    Text("No known drug interactions identified.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 8)
-                }
-            } label: {
-                HStack {
-                    Text("💊 Drug Interactions")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isDrugInteractionsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Dosage Analysis (placeholder - Stage 3)
-            DisclosureGroup(isExpanded: $isDosageExpanded) {
-                HStack {
-                    Text("Tap to load dosage analysis...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundColor(.blue)
-                }
-                .padding(.top, 8)
-            } label: {
-                HStack {
-                    Text("📊 Dosage Analysis")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isDosageExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Safety & Warnings (placeholder - Stage 3)
-            DisclosureGroup(isExpanded: $isSafetyExpanded) {
-                HStack {
-                    Text("Tap to load safety information...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundColor(.blue)
-                }
-                .padding(.top, 8)
-            } label: {
-                HStack {
-                    Text("⚠️ Safety & Warnings")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isSafetyExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Quality Indicators (placeholder - Stage 3)
-            DisclosureGroup(isExpanded: $isQualityExpanded) {
-                HStack {
-                    Text("Tap to load quality indicators...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundColor(.blue)
-                }
-                .padding(.top, 8)
-            } label: {
-                HStack {
-                    Text("✅ Quality Indicators")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: isQualityExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Similar Supplements (existing - keep)
-            if !grocerySuggestions.isEmpty {
-                DisclosureGroup(isExpanded: .constant(false)) {
-                    VStack(spacing: 12) {
-                        ForEach(grocerySuggestions, id: \.productName) { suggestion in
-                            suggestionCard(suggestion)
-                        }
-                    }
-                    .padding(.top, 8)
-                } label: {
-                    HStack {
-                        Text("⭐ Similar Supplements")
-                            .font(.headline)
-                            .fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(evaluations) { eval in
+                    HStack(spacing: 8) {
+                        Image(systemName: eval.status == "supports" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(eval.status == "supports" ? .green : .orange)
+                            .font(.system(size: 16))
+                        Text(eval.goal)
+                            .font(.subheadline)
                             .foregroundColor(.primary)
-                        Spacer()
-                        Image(systemName: "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
             }
         }
+        .padding(.top, 8)
     }
 }
 

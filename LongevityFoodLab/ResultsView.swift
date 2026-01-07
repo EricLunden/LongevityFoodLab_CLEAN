@@ -47,6 +47,24 @@ struct ResultsView: View {
     @State private var supplementSuggestions: [GrocerySuggestion]? = nil
     @State private var isLoadingSupplementSuggestions = false
     
+    // Secondary API loading state (for supplements)
+    @State private var secondaryLoaded = false
+    @State private var isLoadingSecondary = false
+    
+    // Dropdown expansion state for supplements
+    @State private var isSupplementKeyBenefitsExpanded = false
+    @State private var isSupplementIngredientsExpanded = false
+    @State private var isDrugInteractionsExpanded = false
+    @State private var isDosageExpanded = false
+    @State private var isSafetyExpanded = false
+    @State private var isQualityExpanded = false
+    @State private var isSimilarExpanded = false
+    
+    // Computed property to detect supplements
+    var isSupplementScan: Bool {
+        analysis.scanType == "supplement" || analysis.scanType == "supplement_facts" || isSupplement
+    }
+    
     // Target mode state (for tracker-style dropdowns)
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @AppStorage("macroTargetMode") private var macroTargetModeRaw: String = TargetMode.standardRDA.rawValue
@@ -70,6 +88,15 @@ struct ResultsView: View {
     @State private var showingServingSizeEditor = false
     @State private var servingSizeInput: String = ""
     @State private var currentServingSize: String = ""
+    @State private var currentAnalysis: FoodAnalysis
+    
+    init(analysis: FoodAnalysis, onNewSearch: @escaping () -> Void, isSupplement: Bool = false, onMealAdded: (() -> Void)? = nil) {
+        self.analysis = analysis
+        self.onNewSearch = onNewSearch
+        self.isSupplement = isSupplement
+        self.onMealAdded = onMealAdded
+        _currentAnalysis = State(initialValue: analysis)
+    }
     
     // Parse serving size to get multiplier (e.g., "2 slices" -> 2.0, "1 cup" -> 1.0, "0.5 cups" -> 0.5)
     private func parseServingSizeMultiplier(_ servingSize: String) -> Double {
@@ -123,17 +150,6 @@ struct ResultsView: View {
     private var micronutrientTargetMode: TargetMode {
         get { TargetMode(rawValue: micronutrientTargetModeRaw) ?? .standardRDA }
         set { micronutrientTargetModeRaw = newValue.rawValue }
-    }
-    
-    // Current analysis with loaded data
-    @State private var currentAnalysis: FoodAnalysis
-    
-    init(analysis: FoodAnalysis, onNewSearch: @escaping () -> Void, isSupplement: Bool = false, onMealAdded: (() -> Void)? = nil) {
-        self.analysis = analysis
-        self.onNewSearch = onNewSearch
-        self.isSupplement = isSupplement
-        self.onMealAdded = onMealAdded
-        _currentAnalysis = State(initialValue: analysis)
     }
     
     var body: some View {
@@ -287,45 +303,55 @@ struct ResultsView: View {
                         }
                     }
                     
-                    // Key Benefits dropdown
-                    keyBenefitsDropdown
-                    
-                    // Longevity Goals grid (existing - only calls API when item tapped)
-                    healthScoresGrid
-                    
-                    // Healthier Choices (only for scanned products) - moved up below Health Goals grid
+                    // For supplements: Health Goals Grid (always visible) + Dropdowns (load on tap)
+                    // For groceries/meals: Existing structure
                     let isGrocery = analysis.scanType == "product" || analysis.scanType == "nutrition_label"
-                    if isGrocery {
-                        HealthierChoicesView(analysis: currentAnalysis)
-                    }
                     
-                    // Ingredients Analysis dropdown (renamed from Nutritional Components Analysis)
-                    ingredientsAnalysisDropdown
-                    
-                    // Your Macronutrients dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        macrosDropdownTrackerStyle
-                    }
-                    
-                    // Your Micronutrients dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        microsDropdownTrackerStyle
-                    }
-                    
-                    // Quality & Source dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        QualitySourceView(foodName: analysis.foodName)
-                    }
-                    
-                    // Best Practices dropdown (if available)
-                    let bestPrep = currentAnalysis.bestPreparationOrDefault
-                    if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
-                        bestPracticesDropdown
-                    }
-                    
-                    // Similar Supplements with Higher Scores (only for supplements)
-                    if isSupplement {
-                        similarSupplementsSection
+                    if isSupplementScan {
+                        // Health Goals Grid (ALWAYS VISIBLE - not a dropdown)
+                        supplementHealthGoalsGrid
+                        
+                        Divider()
+                            .padding(.vertical, 8)
+                        
+                        // Supplement dropdowns (all load via ONE secondary API call)
+                        supplementDropdowns
+                    } else {
+                        // Existing structure for groceries/meals
+                        // Key Benefits dropdown
+                        keyBenefitsDropdown
+                        
+                        // Longevity Goals grid (existing - only calls API when item tapped)
+                        healthScoresGrid
+                        
+                        // Healthier Choices (only for scanned products) - moved up below Health Goals grid
+                        if isGrocery {
+                            HealthierChoicesView(analysis: currentAnalysis)
+                        }
+                        
+                        // Ingredients Analysis dropdown (renamed from Nutritional Components Analysis)
+                        ingredientsAnalysisDropdown
+                        
+                        // Your Macronutrients dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            macrosDropdownTrackerStyle
+                        }
+                        
+                        // Your Micronutrients dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            microsDropdownTrackerStyle
+                        }
+                        
+                        // Quality & Source dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            QualitySourceView(foodName: analysis.foodName)
+                        }
+                        
+                        // Best Practices dropdown (if available)
+                        let bestPrep = currentAnalysis.bestPreparationOrDefault
+                        if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
+                            bestPracticesDropdown
+                        }
                     }
                     
                     // Add to Meal Tracker and Evaluate Another Food buttons (hidden for groceries and supplements)
@@ -4391,8 +4417,636 @@ struct AddToMealTrackerSheet: View {
         default: return Color.red
         }
     }
+    
+    // MARK: - Supplement Health Goals Grid (Always Visible)
+    
+    @ViewBuilder
+    var supplementHealthGoalsGrid: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("🔬 Latest Health Goals Research")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            
+            // 3x2 Grid of health score boxes
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 12) {
+                HealthScoreBox(icon: "❤️", label: "Heart\nHealth", score: currentAnalysis.healthScores.heartHealth)
+                HealthScoreBox(icon: "🧠", label: "Brain\nHealth", score: currentAnalysis.healthScores.brainHealth)
+                HealthScoreBox(icon: "💪", label: "Energy", score: currentAnalysis.healthScores.energy)
+                HealthScoreBox(icon: "😴", label: "Sleep", score: currentAnalysis.healthScores.sleep)
+                HealthScoreBox(icon: "🛡️", label: "Immune", score: currentAnalysis.healthScores.immune)
+                HealthScoreBox(icon: "🦴", label: "Joint\nHealth", score: currentAnalysis.healthScores.jointHealth)
+            }
+            
+            // User's goals evaluation
+            if let evaluations = currentAnalysis.healthGoalsEvaluation, !evaluations.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your Goals:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    ForEach(evaluations) { eval in
+                        HStack {
+                            Image(systemName: eval.status == "supports" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(eval.status == "supports" ? .green : .orange)
+                            Text("\(eval.goal) — \(eval.score) \(eval.status == "supports" ? "Strong match" : "Limited support")")
+                                .font(.caption)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    struct HealthScoreBox: View {
+        let icon: String
+        let label: String
+        let score: Int
+        
+        var body: some View {
+            VStack(spacing: 4) {
+                Text(icon)
+                    .font(.title2)
+                Text(label)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+                Text("\(score)")
+                    .font(.title3)
+                    .fontWeight(.bold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray5))
+            .cornerRadius(8)
+        }
+    }
+    
+    // MARK: - Supplement Dropdowns (Load on Tap)
+    
+    @ViewBuilder
+    var supplementDropdowns: some View {
+        VStack(spacing: 0) {
+            // Key Benefits
+            DisclosureGroup("🎯 Key Benefits", isExpanded: $isSupplementKeyBenefitsExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading details...")
+                        .padding()
+                } else if let benefits = currentAnalysis.keyBenefits, !benefits.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(benefits, id: \.self) { benefit in
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text(benefit)
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                    .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isSupplementKeyBenefitsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Ingredients Analysis
+            DisclosureGroup("🧪 Ingredients Analysis", isExpanded: $isSupplementIngredientsExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading research ratings...")
+                        .padding()
+                } else if let ingredientAnalyses = currentAnalysis.ingredientAnalyses, !ingredientAnalyses.isEmpty {
+                    VStack(spacing: 12) {
+                        ForEach(ingredientAnalyses) { ingredient in
+                            SupplementIngredientRow(ingredient: ingredient)
+                        }
+                    }
+                    .padding()
+                } else if let ingredients = currentAnalysis.ingredients, !ingredients.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(ingredients) { ingredient in
+                            HStack {
+                                Image(systemName: "checkmark.square.fill")
+                                    .foregroundColor(.green)
+                                Text(ingredient.name)
+                                Spacer()
+                                if let amount = ingredient.amount {
+                                    Text(amount)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .font(.subheadline)
+                        }
+                        
+                        Button(action: { loadSecondaryIfNeeded() }) {
+                            HStack {
+                                Image(systemName: "arrow.down.circle")
+                                Text("Load research ratings")
+                            }
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isSupplementIngredientsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Drug Interactions
+            DisclosureGroup("💊 Drug Interactions", isExpanded: $isDrugInteractionsExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading...")
+                        .padding()
+                } else if let interactions = currentAnalysis.drugInteractions, !interactions.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(interactions) { interaction in
+                            DrugInteractionRow(interaction: interaction)
+                        }
+                        
+                        Text("List is for information only and may not be complete. Always ask your doctor before taking any supplement regularly.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                    .padding()
+                } else if secondaryLoaded {
+                    Text("No known drug interactions identified.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isDrugInteractionsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Dosage Analysis
+            DisclosureGroup("📊 Dosage Analysis", isExpanded: $isDosageExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading...")
+                        .padding()
+                } else if let details = currentAnalysis.secondaryDetails,
+                          !details.dosageAnalyses.isEmpty {
+                    VStack(spacing: 12) {
+                        ForEach(details.dosageAnalyses) { dosage in
+                            DosageAnalysisRow(dosage: dosage)
+                        }
+                    }
+                    .padding()
+                } else if secondaryLoaded {
+                    Text("No dosage analysis available.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isDosageExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Safety & Warnings
+            DisclosureGroup("⚠️ Safety & Warnings", isExpanded: $isSafetyExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading...")
+                        .padding()
+                } else if let details = currentAnalysis.secondaryDetails,
+                          !details.safetyWarnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(details.safetyWarnings) { warning in
+                            SafetyWarningRow(warning: warning)
+                        }
+                        
+                        Text("This is not medical advice. Consult your healthcare provider before starting any supplement.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                    .padding()
+                } else if secondaryLoaded {
+                    Text("No specific warnings identified.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isSafetyExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Quality Indicators
+            DisclosureGroup("✅ Quality Indicators", isExpanded: $isQualityExpanded) {
+                if isLoadingSecondary {
+                    ProgressView("Loading...")
+                        .padding()
+                } else if let details = currentAnalysis.secondaryDetails,
+                          !details.qualityIndicators.isEmpty {
+                    VStack(spacing: 12) {
+                        ForEach(details.qualityIndicators) { indicator in
+                            QualityIndicatorRow(indicator: indicator)
+                        }
+                    }
+                    .padding()
+                } else if secondaryLoaded {
+                    Text("No quality indicators identified.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                } else {
+                    Text("Tap to load...")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+            .onChange(of: isQualityExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            Divider()
+            
+            // Similar Supplements (already cached from popup)
+            DisclosureGroup("⭐ Similar Supplements", isExpanded: $isSimilarExpanded) {
+                if let suggestions = currentAnalysis.suggestions, !suggestions.isEmpty {
+                    VStack(spacing: 12) {
+                        ForEach(suggestions) { suggestion in
+                            // Use existing suggestion card view
+                            Text(suggestion.productName)
+                                .font(.subheadline)
+                        }
+                    }
+                    .padding()
+                } else {
+                    Text("No similar supplements found.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Secondary API Loading
+    
+    private func loadSecondaryIfNeeded() {
+        guard !secondaryLoaded && !isLoadingSecondary else { return }
+        guard isSupplementScan else { return }
+        
+        isLoadingSecondary = true
+        print("📦 SUPPLEMENT: Loading secondary details...")
+        
+        Task {
+            do {
+                let details = try await fetchSecondaryDetails(for: currentAnalysis)
+                
+                await MainActor.run {
+                    // Update currentAnalysis with secondary data
+                    currentAnalysis = FoodAnalysis(
+                        foodName: currentAnalysis.foodName,
+                        overallScore: currentAnalysis.overallScore,
+                        summary: currentAnalysis.summary,
+                        healthScores: currentAnalysis.healthScores,
+                        keyBenefits: details.keyBenefits.isEmpty ? currentAnalysis.keyBenefits : details.keyBenefits,
+                        ingredients: currentAnalysis.ingredients,
+                        bestPreparation: currentAnalysis.bestPreparation,
+                        servingSize: currentAnalysis.servingSize,
+                        nutritionInfo: currentAnalysis.nutritionInfo,
+                        scanType: currentAnalysis.scanType,
+                        foodNames: currentAnalysis.foodNames,
+                        suggestions: currentAnalysis.suggestions,
+                        dataCompleteness: currentAnalysis.dataCompleteness,
+                        analysisTimestamp: currentAnalysis.analysisTimestamp,
+                        dataSource: currentAnalysis.dataSource,
+                        ingredientAnalyses: details.ingredientAnalyses.isEmpty ? currentAnalysis.ingredientAnalyses : details.ingredientAnalyses,
+                        drugInteractions: details.drugInteractions.isEmpty ? currentAnalysis.drugInteractions : details.drugInteractions,
+                        overallResearchScore: currentAnalysis.overallResearchScore,
+                        secondaryDetails: SupplementSecondaryDetails(
+                            dosageAnalyses: details.dosageAnalyses,
+                            safetyWarnings: details.safetyWarnings,
+                            qualityIndicators: details.qualityIndicators
+                        ),
+                        healthGoalsEvaluation: currentAnalysis.healthGoalsEvaluation
+                    )
+                    
+                    secondaryLoaded = true
+                    isLoadingSecondary = false
+                    
+                    print("📦 SUPPLEMENT: Secondary details loaded")
+                    print("📦 SUPPLEMENT: - Key benefits: \(details.keyBenefits.count)")
+                    print("📦 SUPPLEMENT: - Ingredients with scores: \(details.ingredientAnalyses.count)")
+                    print("📦 SUPPLEMENT: - Drug interactions: \(details.drugInteractions.count)")
+                    print("📦 SUPPLEMENT: - Dosage analyses: \(details.dosageAnalyses.count)")
+                    print("📦 SUPPLEMENT: - Safety warnings: \(details.safetyWarnings.count)")
+                    print("📦 SUPPLEMENT: - Quality indicators: \(details.qualityIndicators.count)")
+                }
+            } catch {
+                print("📦 SUPPLEMENT: Secondary load failed: \(error)")
+                await MainActor.run {
+                    isLoadingSecondary = false
+                }
+            }
+        }
+    }
+    
+    private func fetchSecondaryDetails(for analysis: FoodAnalysis) async throws -> SecondaryDetailsResponse {
+        guard let url = URL(string: SecureConfig.openAIBaseURL) else {
+            throw NSError(domain: "Invalid URL", code: 0)
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 45.0
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(SecureConfig.openAIAPIKey)", forHTTPHeaderField: "Authorization")
+        
+        // Build ingredients list for context
+        let ingredientsList = analysis.ingredients?.map { "\($0.name) - \($0.amount ?? "unknown")" }.joined(separator: ", ") ?? ""
+        
+        let prompt = """
+        Analyze this supplement and provide detailed information.
+        
+        Supplement: \(analysis.foodName)
+        Ingredients: \(ingredientsList)
+        
+        Return ONLY valid JSON with this structure:
+        {
+            "keyBenefits": ["benefit1", "benefit2", "benefit3", "benefit4"],
+            "ingredientAnalyses": [
+                {
+                    "name": "Full ingredient name with brand",
+                    "amount": "100mg",
+                    "form": "specific form if applicable",
+                    "researchScore": 1-100,
+                    "briefSummary": "One sentence about function and research support"
+                }
+            ],
+            "drugInteractions": [
+                {
+                    "drugCategory": "Drug category name",
+                    "interaction": "Description of interaction",
+                    "severity": "moderate or serious"
+                }
+            ],
+            "dosageAnalyses": [
+                {
+                    "ingredient": "Ingredient name",
+                    "labelDose": "100mg",
+                    "clinicalRange": "100-200mg",
+                    "verdict": "optimal, low, or high"
+                }
+            ],
+            "safetyWarnings": [
+                {
+                    "warning": "Warning text",
+                    "category": "pregnancy, nursing, surgery, sideEffect, allergy"
+                }
+            ],
+            "qualityIndicators": [
+                {
+                    "indicator": "Indicator name",
+                    "status": "positive, negative, or neutral",
+                    "detail": "Additional detail"
+                }
+            ]
+        }
+        
+        RESEARCH SCORE CRITERIA (1-100):
+        - 90-100 (Gold Standard): Large RCT OR meta-analysis OR 10+ quality studies + long history
+        - 75-89 (Strong Evidence): Multiple quality studies OR one excellent RCT OR centuries of traditional use
+        - 60-74 (Good Evidence): Several small studies + plausible mechanism
+        - 40-59 (Emerging Evidence): 1-2 small studies OR strong animal data
+        - 20-39 (Limited Evidence): Animal/cell studies only
+        - 1-19 (Insufficient Evidence): Minimal research
+        
+        Quality factors that INCREASE score:
+        - Gold-standard RCT, meta-analysis, long safe use history, well-understood mechanism
+        
+        Quality factors that DECREASE score:
+        - Only animal studies, conflicting results, small samples, industry-funded only
+        
+        DRUG INTERACTIONS: Only include clinically relevant interactions.
+        DOSAGE: Compare to ranges used in clinical research.
+        SAFETY: Include pregnancy, nursing, surgery, common side effects.
+        QUALITY: Note certifications, branded ingredients, allergens, third-party testing.
+        """
+        
+        let requestBody: [String: Any] = [
+            "model": SecureConfig.openAIModelName,
+            "max_tokens": 2000,
+            "temperature": 0.1,
+            "response_format": ["type": "json_object"],
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw NSError(domain: "HTTP Error", code: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String,
+              let contentData = content.data(using: .utf8) else {
+            throw NSError(domain: "Invalid response", code: 0)
+        }
+        
+        let details = try JSONDecoder().decode(SecondaryDetailsResponse.self, from: contentData)
+        return details
+    }
 }
 
+// MARK: - Secondary Details Response
+
+struct SecondaryDetailsResponse: Codable {
+    let keyBenefits: [String]
+    let ingredientAnalyses: [IngredientAnalysis]
+    let drugInteractions: [DrugInteraction]
+    let dosageAnalyses: [DosageAnalysis]
+    let safetyWarnings: [SafetyWarning]
+    let qualityIndicators: [QualityIndicator]
+}
+
+// MARK: - Row Components
+
+struct DosageAnalysisRow: View {
+    let dosage: DosageAnalysis
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(dosage.ingredient)
+                .font(.subheadline)
+                .fontWeight(.medium)
+            
+            HStack {
+                Text("Label: \(dosage.labelDose)")
+                    .font(.caption)
+                Spacer()
+                Text("Clinical: \(dosage.clinicalRange)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 8)
+                        .cornerRadius(4)
+                    
+                    Rectangle()
+                        .fill(dosageColor)
+                        .frame(width: geo.size.width * dosagePercentage, height: 8)
+                        .cornerRadius(4)
+                }
+            }
+            .frame(height: 8)
+            
+            HStack {
+                Image(systemName: dosage.verdict == "optimal" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(dosage.verdict == "optimal" ? .green : .orange)
+                Text(verdictText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+    
+    var dosagePercentage: CGFloat {
+        switch dosage.verdict {
+        case "optimal": return 0.8
+        case "high": return 1.0
+        default: return 0.3
+        }
+    }
+    
+    var dosageColor: Color {
+        switch dosage.verdict {
+        case "optimal": return .green
+        case "high": return .orange
+        default: return .yellow
+        }
+    }
+    
+    var verdictText: String {
+        switch dosage.verdict {
+        case "optimal": return "Optimal — Within effective range"
+        case "high": return "High — Above typical clinical range"
+        default: return "Below optimal — Consider higher dose"
+        }
+    }
+}
+
+struct SafetyWarningRow: View {
+    let warning: SafetyWarning
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: warning.category == "sideEffect" ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundColor(warning.category == "sideEffect" ? .blue : .orange)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(warning.category.capitalized)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                Text(warning.warning)
+                    .font(.subheadline)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+}
+
+struct QualityIndicatorRow: View {
+    let indicator: QualityIndicator
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: statusIcon)
+                .foregroundColor(statusColor)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(indicator.indicator)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                if let detail = indicator.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+    
+    var statusIcon: String {
+        switch indicator.status {
+        case "positive": return "checkmark.circle.fill"
+        case "negative": return "exclamationmark.triangle.fill"
+        default: return "info.circle.fill"
+        }
+    }
+    
+    var statusColor: Color {
+        switch indicator.status {
+        case "positive": return .green
+        case "negative": return .orange
+        default: return .blue
+        }
+    }
+}
+
+// Preview removed due to complex initialization requirements
+/*
 #Preview {
     ResultsView(
         analysis: FoodAnalysis(
@@ -4439,3 +5093,4 @@ struct AddToMealTrackerSheet: View {
         onNewSearch: {}
     )
 }
+*/

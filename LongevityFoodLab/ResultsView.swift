@@ -3783,16 +3783,16 @@ struct ResultsView: View {
                                 .font(.headline)
                                 .fontWeight(.semibold)
                             
-                            ForEach(citations) { citation in
-                                HealthGoalCitationRowView(citation: citation)
-                            }
-                            
-                            // App Store compliant disclaimer
-                            Text("This information is for educational purposes only and is not medical advice.")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .italic()
-                                .padding(.top, 4)
+                        ForEach(citations) { citation in
+                            HealthGoalCitationRowView(citation: citation)
+                        }
+                        
+                        // Standardized educational disclaimer
+                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.top, 8)
                         }
                     } else if !researchEvidence.isEmpty {
                         // Fallback to text display if citations not available
@@ -3811,6 +3811,13 @@ struct ResultsView: View {
                                         .foregroundColor(.primary)
                                 }
                             }
+                            
+                            // Standardized educational disclaimer
+                            Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .padding(.top, 8)
                         }
                     }
                 } else {
@@ -3825,6 +3832,13 @@ struct ResultsView: View {
                                     print("Legacy research evidence suppressed — verification required")
                                 }
                             }
+                        
+                        // Standardized educational disclaimer
+                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.top, 8)
                     }
                 }
             }
@@ -5144,12 +5158,12 @@ struct HealthDetailView: View {
                             CitationRowView(citation: citation)
                         }
                         
-                        // App Store compliant disclaimer
-                        Text("This information is for educational purposes only and is not medical advice.")
-                            .font(.caption2)
+                        // Standardized educational disclaimer
+                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                            .font(.footnote)
                             .foregroundColor(.secondary)
-                            .italic()
-                            .padding(.top, 4)
+                            .multilineTextAlignment(.leading)
+                            .padding(.top, 8)
                     }
                 } else if !info.researchEvidence.isEmpty {
                     // Fallback to text display if citations not available
@@ -5163,6 +5177,13 @@ struct HealthDetailView: View {
                                 .font(.body)
                                 .foregroundColor(.secondary)
                         }
+                        
+                        // Standardized educational disclaimer
+                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.top, 8)
                     }
                 }
             } else {
@@ -5177,6 +5198,13 @@ struct HealthDetailView: View {
                                 print("Legacy research evidence suppressed — verification required")
                             }
                         }
+                    
+                    // Standardized educational disclaimer
+                    Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .padding(.top, 8)
                 }
             }
         }

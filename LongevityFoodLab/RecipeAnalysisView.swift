@@ -502,6 +502,8 @@ struct RecipeAnalysisView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
             
             if filteredGoals.isEmpty {
                 Text("Select health goals in your profile to see personalized research.")
@@ -530,6 +532,9 @@ struct RecipeAnalysisView: View {
                     }
                 }
             }
+            
+            // Educational disclaimer - always shown
+            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))

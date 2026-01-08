@@ -7,6 +7,18 @@ struct HealthDetailItem: Identifiable {
     let score: Int
 }
 
+// Reusable Health Goals disclaimer view
+struct HealthGoalsDisclaimerView: View {
+    var body: some View {
+        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
+            .font(.footnote)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.top, 12)
+            .padding(.horizontal, 16)
+    }
+}
+
 // Health goal research info for supplements (defined before ResultsView for accessibility)
 // HealthGoalResearchInfo moved to ResearchCitation.swift
 
@@ -2780,6 +2792,8 @@ struct ResultsView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
             
             if filteredGoals.isEmpty {
                 // If no user goals selected, show message
@@ -2813,6 +2827,9 @@ struct ResultsView: View {
                     }
                 }
             }
+            
+            // Educational disclaimer - always shown
+            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))
@@ -3703,6 +3720,8 @@ struct ResultsView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
             
             if filteredGoals.isEmpty {
                 // If no user goals selected, show message
@@ -3766,6 +3785,9 @@ struct ResultsView: View {
                 .padding()
                 .frame(maxWidth: .infinity)
             }
+            
+            // Educational disclaimer - always shown
+            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))
@@ -3879,13 +3901,6 @@ struct ResultsView: View {
                         ForEach(citations) { citation in
                             HealthGoalCitationRowView(citation: citation)
                         }
-                        
-                        // Standardized educational disclaimer
-                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .padding(.top, 8)
                         }
                     } else if !researchEvidence.isEmpty {
                         // Fallback to text display if citations not available
@@ -3904,13 +3919,6 @@ struct ResultsView: View {
                                         .foregroundColor(.primary)
                                 }
                             }
-                            
-                            // Standardized educational disclaimer
-                            Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.leading)
-                                .padding(.top, 8)
                         }
                     }
                 } else {
@@ -3925,13 +3933,6 @@ struct ResultsView: View {
                                     print("Legacy research evidence suppressed — verification required")
                                 }
                             }
-                        
-                        // Standardized educational disclaimer
-                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .padding(.top, 8)
                     }
                 }
             }
@@ -5051,6 +5052,9 @@ struct HealthDetailView: View {
                         }
                         .padding()
                     }
+                    
+                    // Educational disclaimer - always shown
+                    HealthGoalsDisclaimerView()
                 }
                 .padding()
             }
@@ -5250,13 +5254,6 @@ struct HealthDetailView: View {
                         ForEach(citations) { citation in
                             CitationRowView(citation: citation)
                         }
-                        
-                        // Standardized educational disclaimer
-                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .padding(.top, 8)
                     }
                 } else if !info.researchEvidence.isEmpty {
                     // Fallback to text display if citations not available
@@ -5270,13 +5267,6 @@ struct HealthDetailView: View {
                                 .font(.body)
                                 .foregroundColor(.secondary)
                         }
-                        
-                        // Standardized educational disclaimer
-                        Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .padding(.top, 8)
                     }
                 }
             } else {
@@ -5291,13 +5281,6 @@ struct HealthDetailView: View {
                                 print("Legacy research evidence suppressed — verification required")
                             }
                         }
-                    
-                    // Standardized educational disclaimer
-                    Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.top, 8)
                 }
             }
         }

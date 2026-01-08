@@ -203,6 +203,9 @@ struct RecipeAnalysisView: View {
                             if !analysis.bestPreparationOrDefault.isEmpty && !isHealthierChoicesText(analysis.bestPreparationOrDefault) {
                                 bestPracticesDropdown
                             }
+                            
+                            // Educational disclaimer - always shown at bottom
+                            HealthGoalsDisclaimerView()
                         }
                 }
             }
@@ -532,9 +535,6 @@ struct RecipeAnalysisView: View {
                     }
                 }
             }
-            
-            // Educational disclaimer - always shown
-            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))

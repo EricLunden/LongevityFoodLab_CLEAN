@@ -7,15 +7,16 @@ struct HealthDetailItem: Identifiable {
     let score: Int
 }
 
-// Reusable Health Goals disclaimer view
+// Reusable Health Goals disclaimer view (plain text, no background)
 struct HealthGoalsDisclaimerView: View {
     var body: some View {
         Text("This information is provided for educational purposes only and reflects general research findings. It is not intended to diagnose, treat, cure, or prevent any disease.")
             .font(.footnote)
             .foregroundColor(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.top, 12)
-            .padding(.horizontal, 16)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
     }
 }
 
@@ -387,6 +388,9 @@ struct ResultsView: View {
                         
                         // Supplement dropdowns (all load via ONE secondary API call)
                         supplementDropdowns
+                        
+                        // Educational disclaimer - always shown at bottom
+                        HealthGoalsDisclaimerView()
                     } else {
                         // Existing structure for groceries/meals
                         // Key Benefits dropdown
@@ -423,6 +427,9 @@ struct ResultsView: View {
                         if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
                             bestPracticesDropdown
                         }
+                        
+                        // Educational disclaimer - always shown at bottom
+                        HealthGoalsDisclaimerView()
                     }
                     
                     // Add to Meal Tracker and Evaluate Another Food buttons (hidden for groceries and supplements)
@@ -2827,9 +2834,6 @@ struct ResultsView: View {
                     }
                 }
             }
-            
-            // Educational disclaimer - always shown
-            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))
@@ -3785,9 +3789,6 @@ struct ResultsView: View {
                 .padding()
                 .frame(maxWidth: .infinity)
             }
-            
-            // Educational disclaimer - always shown
-            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))

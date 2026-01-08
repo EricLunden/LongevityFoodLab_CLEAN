@@ -936,9 +936,6 @@ struct MealDetailsView: View {
                     }
                 }
             }
-            
-            // Educational disclaimer - always shown
-            HealthGoalsDisclaimerView()
         }
         .padding()
         .background(Color(.systemGray6))
@@ -1329,6 +1326,9 @@ struct MealDetailsView: View {
             if !analysis.bestPreparationOrDefault.isEmpty && !isHealthierChoicesText(analysis.bestPreparationOrDefault) {
                 bestPracticesDropdown(analysis)
             }
+            
+            // Educational disclaimer - always shown at bottom
+            HealthGoalsDisclaimerView()
             
             // Notes if available
             if let notes = meal.notes, !notes.isEmpty {

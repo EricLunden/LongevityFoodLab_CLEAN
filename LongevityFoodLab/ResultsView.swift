@@ -8,11 +8,7 @@ struct HealthDetailItem: Identifiable {
 }
 
 // Health goal research info for supplements (defined before ResultsView for accessibility)
-struct HealthGoalResearchInfo: Codable {
-    let summary: String
-    let researchEvidence: [String]
-    let sources: [String]
-}
+// HealthGoalResearchInfo moved to ResearchCitation.swift
 
 struct ResultsView: View {
     let analysis: FoodAnalysis
@@ -3601,7 +3597,8 @@ struct ResultsView: View {
                     score: expanded.score,
                     summary: research.summary,
                     researchEvidence: research.researchEvidence,
-                    sources: research.sources
+                    sources: research.sources,
+                    isVerified: research.isVerified
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let expanded = expandedHealthGoal, isLoadingHealthGoalResearch {
@@ -3687,6 +3684,7 @@ struct ResultsView: View {
         let summary: String
         let researchEvidence: [String]
         let sources: [String]
+        let isVerified: Bool  // Flag to indicate if research is verified
         
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -3706,39 +3704,54 @@ struct ResultsView: View {
                     .font(.subheadline)
                     .foregroundColor(.primary)
                 
-                // Research Evidence
-                if !researchEvidence.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Research Evidence:")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                        
-                        ForEach(researchEvidence, id: \.self) { evidence in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•")
-                                    .foregroundColor(.secondary)
-                                Text(evidence)
-                                    .font(.caption)
-                                    .foregroundColor(.primary)
+                // Research Evidence - Only display if verified
+                if isVerified {
+                    if !researchEvidence.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Research Evidence:")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.secondary)
+                            
+                            ForEach(researchEvidence, id: \.self) { evidence in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                        .foregroundColor(.secondary)
+                                    Text(evidence)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
                             }
                         }
                     }
-                }
-                
-                // Sources
-                if !sources.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Sources:")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                        
-                        ForEach(sources, id: \.self) { source in
-                            Text(source)
-                                .font(.caption2)
+                    
+                    // Sources
+                    if !sources.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Sources:")
+                                .font(.caption)
+                                .fontWeight(.medium)
                                 .foregroundColor(.secondary)
+                            
+                            ForEach(sources, id: \.self) { source in
+                                Text(source)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
+                    }
+                } else {
+                    // Legacy research suppressed
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No verified human research available.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .onAppear {
+                                if !researchEvidence.isEmpty {
+                                    print("Legacy research evidence suppressed — verification required")
+                                }
+                            }
                     }
                 }
             }
@@ -4407,43 +4420,52 @@ struct ResultsView: View {
                 
                 RESEARCH EVIDENCE (2-3 bullet points):
                 - Each point links SPECIFIC INGREDIENT's SPECIFIC NUTRIENT to \(category.lowercased()) health
-                - Format: "[Ingredient]'s [nutrient] [specific finding]. ([Author] et al., [Year])"
-                - Only cite REAL peer-reviewed studies from PubMed
+                - Only cite REAL peer-reviewed studies from PubMed-indexed journals
                 - If no research exists for an ingredient, skip it
                 - NEVER mention the supplement name "\(currentAnalysis.foodName)" in research evidence - only ingredient names
-                
-                SOURCES (2-3 bullet points):
-                - List only journals/studies cited in Research Evidence
-                - Format: "• Journal Name (Year)"
-                - If Research Evidence is empty, return empty array []
+                - CRITICAL: Each citation MUST include DOI or PubMed PMID for verification
+                - If you cannot provide DOI or PMID, EXCLUDE the study entirely
+                - Do NOT guess identifiers - only include studies where you can provide accurate DOI or PMID
                 
                 Return ONLY this JSON:
                 {
                     "summary": "40-60 word paragraph starting with score",
                     "researchEvidence": [
-                        "[Ingredient]'s [nutrient] [finding]. ([Author] et al., [Year])"
-                    ],
-                    "sources": [
-                        "• Journal Name (Year)"
+                        {
+                            "ingredient": "Ingredient name",
+                            "nutrient": "Specific nutrient",
+                            "outcome": "Health outcome finding",
+                            "authors": "First Author et al.",
+                            "year": 2021,
+                            "journal": "Journal Name",
+                            "doi": "10.xxxx/xxxxx or null",
+                            "pmid": "12345678 or null"
+                        }
                     ]
                 }
+                
+                REQUIREMENTS:
+                - At least ONE of doi or pmid must be provided (not both null)
+                - DOI format: 10.xxxx/xxxxx
+                - PMID format: numeric, 6-8 digits
+                - If no verified studies exist, return empty researchEvidence array []
                 """
                 
                 let text = try await AIService.shared.makeOpenAIRequestAsync(prompt: prompt)
                 
+                // Process through ResearchEvidenceService for verification
+                let verifiedCitations = await ResearchEvidenceService.shared.processAIResponse(text)
+                
                 await MainActor.run {
                     isLoadingHealthGoalResearch = false
                     
-                    // Extract JSON from response
-                    let jsonText = extractJSONFromText(text)
-                    if let infoData = jsonText.data(using: .utf8) {
-                        do {
-                            let research = try JSONDecoder().decode(HealthGoalResearchInfo.self, from: infoData)
-                            healthGoalResearch = research
-                        } catch {
-                            print("❌ Failed to decode HealthGoalResearchInfo: \(error)")
-                            healthGoalResearch = nil
-                        }
+                    // Convert verified citations to legacy format
+                    if !verifiedCitations.isEmpty {
+                        let summary = extractSummary(from: text) ?? "Research supports the health benefits of this supplement for \(category.lowercased())."
+                        healthGoalResearch = HealthGoalResearchInfo(summary: summary, verifiedCitations: verifiedCitations)
+                    } else {
+                        // No verified citations - return empty structure
+                        healthGoalResearch = HealthGoalResearchInfo(summary: "No verified human research available for this supplement.", verifiedCitations: [])
                     }
                 }
             } catch {
@@ -4464,6 +4486,17 @@ struct ResultsView: View {
             return String(text[jsonRange])
         }
         return text
+    }
+    
+    /// Extracts summary from AI response JSON
+    private func extractSummary(from text: String) -> String? {
+        let jsonText = extractJSONFromText(text)
+        guard let data = jsonText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summary = json["summary"] as? String else {
+            return nil
+        }
+        return summary
     }
     
     // Helper function for health goal research prompts (similar to HealthDetailView)
@@ -4730,33 +4763,48 @@ struct HealthDetailView: View {
                     .foregroundColor(.secondary)
             }
             
-            // Research Evidence
-            if !info.researchEvidence.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Research Evidence")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    ForEach(info.researchEvidence, id: \.self) { evidence in
-                        Text("• \(evidence)")
-                            .font(.body)
-                            .foregroundColor(.secondary)
+            // Research Evidence - Only display if verified
+            if info.isVerified {
+                if !info.researchEvidence.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Research Evidence")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(info.researchEvidence, id: \.self) { evidence in
+                            Text("• \(evidence)")
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
-            }
-            
-            // Sources
-            if !info.sources.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Sources")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    ForEach(info.sources, id: \.self) { source in
-                        Text("• \(source)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                
+                // Sources
+                if !info.sources.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Sources")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(info.sources, id: \.self) { source in
+                            Text("• \(source)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
+                }
+            } else {
+                // Legacy research suppressed
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("No verified human research available.")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .italic()
+                        .onAppear {
+                            if !info.researchEvidence.isEmpty {
+                                print("Legacy research evidence suppressed — verification required")
+                            }
+                        }
                 }
             }
         }
@@ -4859,30 +4907,18 @@ struct HealthDetailView: View {
         RESEARCH EVIDENCE SECTION (2-3 bullet points, ingredient-specific only):
         \(researchInstructions)
         - Each point must link a SPECIFIC INGREDIENT's SPECIFIC NUTRIENT to \(category.lowercased()) health
-        - Format: "[Ingredient]'s [nutrient] [specific finding]. ([First Author] et al., [Year])"
-        - CRITICAL: Only cite REAL, verifiable studies from:
-          * PubMed (peer-reviewed journals)
-          * USDA FoodData Central (for nutrient data)
-          * Blue Zones research (for dietary patterns)
-          * Mediterranean diet trials (e.g., PREDIMED)
-          * High-impact journals (Nature, Science, NEJM, JAMA, etc.)
-          * Systematic reviews (Cochrane, NESR)
+        - CRITICAL: Only cite REAL, verifiable studies from PubMed-indexed peer-reviewed journals
+        - USDA FoodData Central is for nutrient data ONLY, NOT research evidence - do NOT cite USDA as research
         - NEVER fabricate sources, author names, or study findings
         - NEVER use generic citations like "studies show" or "research indicates"
         - Ban these words: "suggests," "may," "potentially," "highlights," "indicates," "could," "might"
         - NEVER mention the recipe/meal name "\(foodName)" in research evidence - only ingredient names
-        - If no ingredient has relevant research, return empty array [] - do not include "no research" messages or placeholder citations
+        - CRITICAL: Each citation MUST include DOI or PubMed PMID for verification
+        - If you cannot provide DOI or PMID, EXCLUDE the study entirely
+        - Do NOT guess identifiers - only include studies where you can provide accurate DOI or PMID
+        - If no ingredient has relevant research with verifiable identifiers, return empty array []
         - If research is unavailable, it's better to show none than to show fake citations
         - Prioritize dietary patterns over isolated nutrient fear - focus on whole food benefits
-        
-        SOURCES SECTION (2-3 bullet points):
-        - List ONLY actual journals or studies cited in Research Evidence above
-        - Format: "• Journal Name (Year)" or "• [Author] et al., Journal Name, Year"
-        - NEVER list: Harvard Health, Mayo Clinic, NIH website, WHO website, WebMD, Healthline, Medical News Today, or any non-peer-reviewed sources
-        - CRITICAL: If Research Evidence is empty (no ingredients had relevant research), return empty array [] - do NOT write "No academic sources available" or any placeholder text
-        - Each source must correspond EXACTLY to a study cited in Research Evidence
-        - NEVER fabricate journal names, author names, or publication years
-        - If you cannot verify a source, do not include it
         
         BANNED PHRASES:
         - "consumed responsibly"
@@ -4897,39 +4933,47 @@ struct HealthDetailView: View {
         {
             "summary": "One paragraph (40-60 words) starting with the \(category.lowercased()) score (\(score)/100), naming specific compounds with numbers, acknowledging negatives",
             "researchEvidence": [
-                "[Finding]. ([Author] et al., [Year])",
-                "[Finding]. ([Author] et al., [Year])"
-            ],
-            "sources": [
-                "• [Journal Name] ([Year])",
-                "• [Author] et al., [Journal Name], [Year]"
+                {
+                    "ingredient": "Ingredient name",
+                    "nutrient": "Specific nutrient",
+                    "outcome": "Health outcome finding",
+                    "authors": "First Author et al.",
+                    "year": 2021,
+                    "journal": "Journal Name",
+                    "doi": "10.xxxx/xxxxx or null",
+                    "pmid": "12345678 or null"
+                }
             ]
         }
+        
+        REQUIREMENTS:
+        - At least ONE of doi or pmid must be provided (not both null)
+        - DOI format: 10.xxxx/xxxxx
+        - PMID format: numeric, 6-8 digits
+        - If no verified studies exist, return empty researchEvidence array []
         """
         
         Task {
             do {
                 let text = try await AIService.shared.makeOpenAIRequestAsync(prompt: prompt)
                 
+                // Process through ResearchEvidenceService for verification
+                let verifiedCitations = await ResearchEvidenceService.shared.processAIResponse(text)
+                
                 await MainActor.run {
                     isLoading = false
                     
-                    // Try to extract JSON from the response text
-                    let jsonText = self.extractJSONFromText(text)
-                    print("🔍 Extracted JSON: \(jsonText.prefix(200))...")
+                    // Extract summary from response
+                    let summary = extractSummary(from: text) ?? self.getCategorySpecificFallbackSummary()
                     
-                    if let infoData = jsonText.data(using: .utf8) {
-                        do {
-                            let info = try JSONDecoder().decode(HealthInfo.self, from: infoData)
-                            print("✅ Successfully decoded HealthInfo")
-                            self.healthInfo = info
-                        } catch {
-                            print("❌ Failed to decode HealthInfo: \(error)")
-                            self.createFallbackHealthInfo()
-                        }
+                    // Convert verified citations to legacy format
+                    if !verifiedCitations.isEmpty {
+                        self.healthInfo = HealthInfo(summary: summary, verifiedCitations: verifiedCitations)
+                        print("✅ Successfully processed \(verifiedCitations.count) verified citations")
                     } else {
-                        print("❌ Failed to convert extracted JSON to data")
-                        self.createFallbackHealthInfo()
+                        // No verified citations - return empty structure
+                        self.healthInfo = HealthInfo(summary: summary, verifiedCitations: [])
+                        print("⚠️ No verified citations found - returning empty research evidence")
                     }
                 }
             } catch {
@@ -4967,17 +5011,43 @@ struct HealthDetailView: View {
     private func createFallbackHealthInfo() {
         let categorySpecificSummary = getCategorySpecificFallbackSummary()
         
+        // Return empty citations - no fake citations allowed
         self.healthInfo = HealthInfo(
             summary: categorySpecificSummary,
-            researchEvidence: [
-                "Research supports the health benefits of nutrient-dense foods for \(category.lowercased())",
-                "Longevity-focused nutrition emphasizes whole food consumption patterns"
-            ],
-            sources: [
-                "Nutritional research database",
-                "Longevity health studies"
-            ]
+            verifiedCitations: []
         )
+    }
+    
+    /// Extracts summary from AI response JSON
+    private func extractSummary(from text: String) -> String? {
+        // Extract JSON from text
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```") {
+            let lines = cleaned.components(separatedBy: .newlines)
+            var jsonLines = lines
+            if let firstLine = jsonLines.first, firstLine.contains("json") {
+                jsonLines.removeFirst()
+            } else if let firstLine = jsonLines.first, firstLine.hasPrefix("```") {
+                jsonLines.removeFirst()
+            }
+            if let lastLine = jsonLines.last, lastLine == "```" {
+                jsonLines.removeLast()
+            }
+            cleaned = jsonLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        if let startIndex = cleaned.firstIndex(of: "{"),
+           let endIndex = cleaned.lastIndex(of: "}") {
+            let jsonRange = startIndex...endIndex
+            cleaned = String(cleaned[jsonRange])
+        }
+        
+        guard let data = cleaned.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summary = json["summary"] as? String else {
+            return nil
+        }
+        return summary
     }
     
     private func getCategorySpecificFallbackSummary() -> String {
@@ -5223,11 +5293,7 @@ struct HealthDetailView: View {
     }
 }
 
-struct HealthInfo: Codable {
-    let summary: String
-    let researchEvidence: [String]
-    let sources: [String]
-}
+// HealthInfo moved to ResearchCitation.swift
 
 struct AddToMealTrackerSheet: View {
     let analysis: FoodAnalysis

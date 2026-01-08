@@ -28,6 +28,10 @@ struct ResultsView: View {
     @State private var isFavorite: Bool = false
     @State private var cachedEntry: FoodCacheEntry? = nil
     
+    // Cache fallback state for unavailable analysis
+    @State private var cachedFallbackAnalysis: FoodAnalysis? = nil
+    @State private var cachedFallbackDate: Date? = nil
+    
     // Progressive loading state
     @State private var loadedKeyBenefits: [String]? = nil
     @State private var loadedIngredients: [FoodIngredient]? = nil
@@ -68,6 +72,10 @@ struct ResultsView: View {
     @State private var healthGoalResearch: HealthGoalResearchInfo? = nil
     @State private var isLoadingHealthGoalResearch = false
     
+    // Lazy-loading state for health goals research cards
+    @State private var loadedHealthGoalResearch: [String: HealthGoalResearchInfo] = [:]
+    @State private var loadingHealthGoalResearch: Set<String> = []
+    
     // Computed property to detect supplements
     var isSupplementScan: Bool {
         analysis.scanType == "supplement" || analysis.scanType == "supplement_facts" || isSupplement
@@ -104,6 +112,35 @@ struct ResultsView: View {
         self.isSupplement = isSupplement
         self.onMealAdded = onMealAdded
         _currentAnalysis = State(initialValue: analysis)
+    }
+    
+    // Check cache for fallback when analysis is unavailable
+    private func checkCacheForFallback() {
+        // Only check cache if current analysis is unavailable
+        guard analysis.overallScore == -1 else { return }
+        
+        // Try to find cached analysis for the same food
+        if let cachedAnalysis = foodCacheManager.getCachedAnalysis(for: analysis.foodName),
+           cachedAnalysis.overallScore != -1 {
+            // Find the cache entry to get the date
+            let matchingEntries = foodCacheManager.cachedAnalyses.filter { entry in
+                FoodAnalysis.normalizeInput(entry.foodName) == FoodAnalysis.normalizeInput(analysis.foodName)
+            }
+            
+            if let entry = matchingEntries.sorted(by: { $0.analysisDate > $1.analysisDate }).first {
+                cachedFallbackAnalysis = cachedAnalysis
+                cachedFallbackDate = entry.analysisDate
+                currentAnalysis = cachedAnalysis
+                print("🔍 ResultsView: Using cached fallback analysis for \(analysis.foodName), dated \(entry.analysisDate)")
+            }
+        }
+    }
+    
+    // Format cache date for display
+    private func formatCacheDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
     
     // Parse serving size to get multiplier (e.g., "2 slices" -> 2.0, "1 cup" -> 1.0, "0.5 cups" -> 0.5)
@@ -289,19 +326,33 @@ struct ResultsView: View {
                     
                     // Summary text with optional longevity reassurance
                     VStack(spacing: 8) {
-                        Text(analysis.summary)
+                        Text(currentAnalysis.summary)
                             .font(.body)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(nil)
                         
+                        // Show "Last updated" indicator if using cached fallback
+                        if cachedFallbackAnalysis != nil, let cacheDate = cachedFallbackDate {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.6))
+                                Text("Last updated: \(formatCacheDate(cacheDate))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.6))
+                            }
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 4)
+                        }
+                        
                         // Longevity-population reassurance (only for qualifying high-quality meals)
-                        if analysis.qualifiesForLongevityReassurance {
+                        if currentAnalysis.qualifiesForLongevityReassurance {
                             HStack(spacing: 6) {
                                 Image(systemName: "leaf.fill")
                                     .font(.caption)
                                     .foregroundColor(.secondary.opacity(0.7))
-                                Text(analysis.longevityReassurancePhrase)
+                                Text(currentAnalysis.longevityReassurancePhrase)
                                     .font(.caption)
                                     .foregroundColor(.secondary.opacity(0.8))
                                     .italic()
@@ -413,7 +464,9 @@ struct ResultsView: View {
             }
         }
         .onAppear {
+            checkCacheForFallback()
             loadImage()
+            lazyLoadTopHealthGoals()
             
             // Ensure currentAnalysis has the latest cached data including suggestions
             // Refresh from cache to get the most up-to-date suggestions
@@ -3540,7 +3593,12 @@ struct ResultsView: View {
                         healthGoalResearch = nil
                     } else {
                         expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
                     }
                 })
                 TappableHealthScoreBox(icon: "🧠", label: "Brain\nHealth", score: currentAnalysis.healthScores.brainHealth, category: "Brain", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Brain", onTap: { category, score in
@@ -3549,7 +3607,12 @@ struct ResultsView: View {
                         healthGoalResearch = nil
                     } else {
                         expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
                     }
                 })
                 TappableHealthScoreBox(icon: "💪", label: "Energy", score: currentAnalysis.healthScores.energy, category: "Energy", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Energy", onTap: { category, score in
@@ -3558,7 +3621,12 @@ struct ResultsView: View {
                         healthGoalResearch = nil
                     } else {
                         expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
                     }
                 })
                 TappableHealthScoreBox(icon: "😴", label: "Sleep", score: currentAnalysis.healthScores.sleep, category: "Sleep", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Sleep", onTap: { category, score in
@@ -3598,7 +3666,8 @@ struct ResultsView: View {
                     summary: research.summary,
                     researchEvidence: research.researchEvidence,
                     sources: research.sources,
-                    isVerified: research.isVerified
+                    isVerified: research.isVerified,
+                    citations: research.citations
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let expanded = expandedHealthGoal, isLoadingHealthGoalResearch {
@@ -3685,6 +3754,7 @@ struct ResultsView: View {
         let researchEvidence: [String]
         let sources: [String]
         let isVerified: Bool  // Flag to indicate if research is verified
+        let citations: [ResearchCitation]?  // Full citation data for clickable links
         
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -3706,7 +3776,26 @@ struct ResultsView: View {
                 
                 // Research Evidence - Only display if verified
                 if isVerified {
-                    if !researchEvidence.isEmpty {
+                    // Research Sources Section (clickable citations)
+                    if let citations = citations, !citations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Research Sources")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            ForEach(citations) { citation in
+                                HealthGoalCitationRowView(citation: citation)
+                            }
+                            
+                            // App Store compliant disclaimer
+                            Text("This information is for educational purposes only and is not medical advice.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                                .padding(.top, 4)
+                        }
+                    } else if !researchEvidence.isEmpty {
+                        // Fallback to text display if citations not available
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Research Evidence:")
                                 .font(.caption)
@@ -3721,22 +3810,6 @@ struct ResultsView: View {
                                         .font(.caption)
                                         .foregroundColor(.primary)
                                 }
-                            }
-                        }
-                    }
-                    
-                    // Sources
-                    if !sources.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sources:")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                            
-                            ForEach(sources, id: \.self) { source in
-                                Text(source)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
                             }
                         }
                     }
@@ -3759,6 +3832,103 @@ struct ResultsView: View {
             .background(Color(.systemBackground))
             .cornerRadius(12)
             .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
+        }
+        
+        // Citation Row View for clickable citations (within HealthGoalResearchPanel)
+        private struct HealthGoalCitationRowView: View {
+            let citation: ResearchCitation
+            
+            var body: some View {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Tier 1: Clickable (DOI/PMID links)
+                    // Tier 2: Non-clickable by default (App Store compliance)
+                    if citation.citationTier == .verifiedPrimary, let urlString = citation.displayURL, let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                // Tier 1: Journal • Year only (UNCHANGED)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                }
+                                
+                                // Tier label
+                                Text("Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } else {
+                        // Non-clickable display (Tier 2 or Tier 1 without URL)
+                        VStack(alignment: .leading, spacing: 4) {
+                            if citation.citationTier == .verifiedPrimary {
+                                // Tier 1: Journal • Year only
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                                Text("Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if citation.citationTier == .authoritativeReview {
+                                // Tier 2: Journal • Year only (non-clickable, educational)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                                Text("Authoritative review (educational)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                // Other tiers - fallback display
+                                Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayJournal) (\(citation.displayYear))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                if let tier = citation.citationTier {
+                                    Text(tier.displayLabel)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Color(.systemGray6))
+                .cornerRadius(6)
+            }
         }
         
         func iconForCategory(_ category: String) -> String {
@@ -4393,8 +4563,17 @@ struct ResultsView: View {
     
     // MARK: - Health Goal Research Loading
     
-    private func loadHealthGoalResearch(for category: String, score: Int) {
-        isLoadingHealthGoalResearch = true
+    private func loadHealthGoalResearch(for category: String, score: Int, storeInCache: Bool = false) {
+        // Skip if already loading or loaded
+        if loadingHealthGoalResearch.contains(category) || loadedHealthGoalResearch[category] != nil {
+            return
+        }
+        
+        // Mark as loading
+        if !storeInCache {
+            isLoadingHealthGoalResearch = true
+        }
+        loadingHealthGoalResearch.insert(category)
         
         Task {
             do {
@@ -4439,7 +4618,9 @@ struct ResultsView: View {
                             "year": 2021,
                             "journal": "Journal Name",
                             "doi": "10.xxxx/xxxxx or null",
-                            "pmid": "12345678 or null"
+                            "pmid": "12345678 or null",
+                            "title": "Study title or null",
+                            "url": "https://doi.org/10.xxxx/xxxxx or https://pubmed.ncbi.nlm.nih.gov/12345678/ or null"
                         }
                     ]
                 }
@@ -4457,22 +4638,61 @@ struct ResultsView: View {
                 let verifiedCitations = await ResearchEvidenceService.shared.processAIResponse(text)
                 
                 await MainActor.run {
-                    isLoadingHealthGoalResearch = false
+                    loadingHealthGoalResearch.remove(category)
+                    if !storeInCache {
+                        isLoadingHealthGoalResearch = false
+                    }
                     
                     // Convert verified citations to legacy format
+                    let researchInfo: HealthGoalResearchInfo
                     if !verifiedCitations.isEmpty {
                         let summary = extractSummary(from: text) ?? "Research supports the health benefits of this supplement for \(category.lowercased())."
-                        healthGoalResearch = HealthGoalResearchInfo(summary: summary, verifiedCitations: verifiedCitations)
+                        researchInfo = HealthGoalResearchInfo(summary: summary, verifiedCitations: verifiedCitations)
                     } else {
                         // No verified citations - return empty structure
-                        healthGoalResearch = HealthGoalResearchInfo(summary: "No verified human research available for this supplement.", verifiedCitations: [])
+                        researchInfo = HealthGoalResearchInfo(summary: "No verified human research available for this supplement.", verifiedCitations: [])
+                    }
+                    
+                    // Store in cache if requested
+                    if storeInCache {
+                        loadedHealthGoalResearch[category] = researchInfo
+                    } else {
+                        // For tap-based loading, update the expanded state
+                        healthGoalResearch = researchInfo
                     }
                 }
             } catch {
-                print("❌ Error loading health goal research: \(error)")
+                print("❌ Error loading health goal research for \(category): \(error)")
                 await MainActor.run {
-                    isLoadingHealthGoalResearch = false
-                    healthGoalResearch = nil
+                    loadingHealthGoalResearch.remove(category)
+                    if !storeInCache {
+                        isLoadingHealthGoalResearch = false
+                        healthGoalResearch = nil
+                    }
+                }
+            }
+        }
+    }
+    
+    // Lazy-load research for top health goals (called on screen appear)
+    private func lazyLoadTopHealthGoals() {
+        // Only load for supplements
+        guard isSupplementScan else { return }
+        
+        // Get top 3 health goals by score (highest scores first)
+        let healthGoals: [(category: String, score: Int)] = [
+            ("Heart", currentAnalysis.healthScores.heartHealth),
+            ("Brain", currentAnalysis.healthScores.brainHealth),
+            ("Energy", currentAnalysis.healthScores.energy)
+        ].sorted(by: { $0.1 > $1.1 })
+        .prefix(3)
+        .map { ($0.0, $0.1) }
+        
+        // Load research for top goals with small delays to avoid overwhelming the API
+        for (index, goal) in healthGoals.enumerated() {
+            if goal.1 > 0 { // Only load if score is valid
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.5) {
+                    self.loadHealthGoalResearch(for: goal.0, score: goal.1, storeInCache: true)
                 }
             }
         }
@@ -4500,159 +4720,160 @@ struct ResultsView: View {
     }
     
     // Helper function for health goal research prompts (similar to HealthDetailView)
+    // CRITICAL: Use educational language only - no medical claims, no treatment/prevention language
     private func getCategorySpecificPrompt(category: String, foodName: String) -> String {
         switch category {
         case "Heart":
             return """
-            Analyze how \(foodName) specifically benefits heart health. Focus on:
-            - Effects on blood pressure, cholesterol levels, and cardiovascular function
-            - Specific compounds that protect heart muscle and blood vessels
-            - Research on heart disease prevention and cardiovascular outcomes
-            - Impact on heart rhythm, arterial health, and cardiac performance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to heart health. Focus on:
+            - Nutrients present that are researched for cardiovascular function
+            - Dietary patterns associated with heart health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to heart function
             """
             
         case "Brain":
             return """
-            Analyze how \(foodName) specifically benefits brain health and cognitive function. Focus on:
-            - Effects on memory, focus, and cognitive performance
-            - Neuroprotective compounds and brain cell health
-            - Research on neurodegenerative disease prevention
-            - Impact on mood, mental clarity, and brain energy metabolism
+            Analyze nutrients in \(foodName) that are commonly studied in relation to brain health. Focus on:
+            - Nutrients present that are researched for cognitive function
+            - Dietary patterns associated with brain health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to brain function
             """
             
         case "Anti-Inflam":
             return """
-            Analyze how \(foodName) specifically reduces inflammation throughout the body. Focus on:
-            - Anti-inflammatory compounds and their mechanisms
-            - Effects on inflammatory markers and cytokines
-            - Research on chronic inflammation reduction
-            - Impact on inflammatory conditions and pain relief
+            Analyze nutrients in \(foodName) that are commonly studied in relation to inflammation. Focus on:
+            - Nutrients and compounds present in the food
+            - Research associations with inflammatory markers
+            - Dietary patterns researched for inflammation
+            - Educational context about nutrient presence (do NOT describe mechanisms as outcomes)
             """
             
         case "Joints":
             return """
-            Analyze how \(foodName) specifically benefits joint health and mobility. Focus on:
-            - Effects on cartilage health and joint lubrication
-            - Anti-inflammatory benefits for joints
-            - Research on arthritis prevention and management
-            - Impact on joint flexibility, pain reduction, and mobility
+            Analyze nutrients in \(foodName) that are commonly studied in relation to joint health. Focus on:
+            - Nutrients present that are researched for joint function
+            - Dietary patterns associated with joint health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to joint function
             """
             
         case "Eyes", "Vision":
             return """
-            Analyze how \(foodName) specifically benefits eye health and vision. Focus on:
-            - Effects on retinal health and visual acuity
-            - Protective compounds for eye tissues
-            - Research on age-related eye disease prevention
-            - Impact on vision clarity, eye strain, and ocular health
+            Analyze nutrients in \(foodName) that are commonly studied in relation to eye health. Focus on:
+            - Nutrients present that are researched for vision function
+            - Dietary patterns associated with eye health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to vision
             """
             
         case "Weight":
             return """
-            Analyze how \(foodName) specifically supports weight management and metabolism. Focus on:
-            - Effects on appetite regulation and satiety
-            - Impact on metabolic rate and fat burning
-            - Research on weight loss and maintenance
-            - Effects on body composition and energy balance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to weight management. Focus on:
+            - Nutrients present that are researched for satiety and metabolism
+            - Dietary patterns associated with weight management
+            - Research context about nutrient presence (do NOT describe weight loss outcomes)
+            - Educational information about nutrients linked to satiety
             """
             
         case "Blood Sugar":
             return """
-            Analyze how \(foodName) specifically affects blood sugar regulation and diabetes prevention. Focus on:
-            - Effects on insulin sensitivity and glucose metabolism
-            - Impact on blood sugar spikes and glycemic control
-            - Research on diabetes prevention and management
-            - Effects on pancreatic function and glucose absorption
+            Analyze nutrients in \(foodName) that are commonly studied in relation to blood sugar. Focus on:
+            - Nutrients present that are researched for glucose metabolism
+            - Dietary patterns associated with blood sugar regulation
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to blood sugar function
             """
             
         case "Energy":
             return """
-            Analyze how \(foodName) specifically boosts energy levels and vitality. Focus on:
-            - Effects on cellular energy production and metabolism
-            - Impact on physical and mental stamina
-            - Research on fatigue reduction and endurance
-            - Effects on mitochondrial function and ATP production
+            Analyze nutrients in \(foodName) that are commonly studied in relation to energy. Focus on:
+            - Nutrients present that are researched for energy metabolism
+            - Dietary patterns associated with energy function
+            - Research context about nutrient presence (do NOT describe mechanisms as outcomes)
+            - Educational information about nutrients linked to energy
             """
             
         case "Immune":
             return """
-            Analyze how \(foodName) specifically strengthens the immune system. Focus on:
-            - Effects on immune cell function and production
-            - Impact on infection resistance and recovery
-            - Research on immune system enhancement
-            - Effects on inflammatory response and immune regulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to immune function. Focus on:
+            - Nutrients present that are researched for immune health
+            - Dietary patterns associated with immune function
+            - Research context about nutrient presence (do NOT describe enhancement or treatment)
+            - Educational information about nutrients linked to immune function
             """
             
         case "Sleep":
             return """
-            Analyze how \(foodName) specifically improves sleep quality and regulation. Focus on:
-            - Effects on sleep hormones and circadian rhythm
-            - Impact on sleep onset and duration
-            - Research on sleep quality improvement
-            - Effects on relaxation and stress reduction for better sleep
+            Analyze nutrients in \(foodName) that are commonly studied in relation to sleep. Focus on:
+            - Nutrients present that are researched for sleep function
+            - Dietary patterns associated with sleep
+            - Research context about nutrient presence (do NOT describe improvement or treatment)
+            - Educational information about nutrients linked to sleep
             """
             
         case "Skin":
             return """
-            Analyze how \(foodName) specifically benefits skin health and appearance. Focus on:
-            - Effects on collagen production and skin elasticity
-            - Impact on skin hydration and texture
-            - Research on anti-aging and skin protection
-            - Effects on skin repair and damage prevention
+            Analyze nutrients in \(foodName) that are commonly studied in relation to skin health. Focus on:
+            - Nutrients present that are researched for skin function
+            - Dietary patterns associated with skin health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to skin function
             """
             
         case "Stress":
             return """
-            Analyze how \(foodName) specifically helps manage stress and promotes relaxation. Focus on:
-            - Effects on stress hormones and nervous system
-            - Impact on anxiety reduction and mood stabilization
-            - Research on stress management and mental health
-            - Effects on cortisol levels and stress response
+            Analyze nutrients in \(foodName) that are commonly studied in relation to stress. Focus on:
+            - Nutrients present that are researched for stress response
+            - Dietary patterns associated with stress management
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to stress function
             """
             
         case "Kidneys":
             return """
-            Analyze how \(foodName) specifically benefits kidney health and function. Focus on:
-            - Effects on kidney filtration and waste removal
-            - Impact on blood pressure and fluid balance
-            - Research on kidney disease prevention
-            - Effects on kidney function and protection
+            Analyze nutrients in \(foodName) that are commonly studied in relation to kidney health. Focus on:
+            - Nutrients present that are researched for kidney function
+            - Dietary patterns associated with kidney health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to kidney function
             """
             
         case "Detox/Liver":
             return """
-            Analyze how \(foodName) specifically supports liver health and detoxification. Focus on:
-            - Effects on liver enzyme function and detox pathways
-            - Impact on toxin processing and elimination
-            - Research on liver disease prevention
-            - Effects on liver health and regeneration
+            Analyze nutrients in \(foodName) that are commonly studied in relation to liver health. Focus on:
+            - Nutrients present that are researched for liver function
+            - Dietary patterns associated with liver health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to liver function
             """
             
         case "Mood":
             return """
-            Analyze how \(foodName) specifically benefits mood and mental well-being. Focus on:
-            - Effects on neurotransmitters and brain chemistry
-            - Impact on depression and anxiety
-            - Research on mood regulation and mental health
-            - Effects on emotional balance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to mood. Focus on:
+            - Nutrients present that are researched for mood function
+            - Dietary patterns associated with mood
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to mood
             """
             
         case "Allergies":
             return """
-            Analyze how \(foodName) specifically affects allergy symptoms and immune response. Focus on:
-            - Effects on histamine response and inflammation
-            - Impact on allergic reactions and symptoms
-            - Research on allergy management and prevention
-            - Effects on immune system modulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to allergies. Focus on:
+            - Nutrients present that are researched for immune response
+            - Dietary patterns associated with allergy response
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to immune function
             """
             
         default:
             return """
-            Analyze how \(foodName) specifically affects \(category.lowercased()) health. Focus on:
-            - Direct effects on \(category.lowercased()) function and health
-            - Specific compounds that benefit \(category.lowercased()) health
-            - Research on \(category.lowercased()) health outcomes
-            - Impact on \(category.lowercased()) performance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to \(category.lowercased()). Focus on:
+            - Nutrients present that are researched for \(category.lowercased()) function
+            - Dietary patterns associated with \(category.lowercased())
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to \(category.lowercased())
             """
         }
     }
@@ -4751,6 +4972,153 @@ struct HealthDetailView: View {
         }
     }
     
+    // Citation Row View for clickable citations
+    private struct CitationRowView: View {
+        let citation: ResearchCitation
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                // Use tier-aware displayURL (Tier 2 never links to DOI resolvers)
+                if let urlString = citation.displayURL, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            // Tier 1: Display ONLY journal and year (registry-sourced)
+                            // Tier 2: Display ONLY journal, year, and tier label (no ingredient/nutrient/outcome)
+                            if citation.citationTier == .verifiedPrimary {
+                                // Tier 1: Journal • Year only (UNCHANGED)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                    Text("•")
+                                        .font(.subheadline)
+                                        .foregroundColor(.blue)
+                                    Text("\(citation.displayYear)")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                }
+                                
+                                // Tier label
+                                Text(citation.citationTier?.displayLabel ?? "Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if citation.citationTier == .authoritativeReview {
+                                // Tier 2: Journal • Year only (no ingredient/nutrient/outcome) - non-clickable
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.subheadline)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                // Tier label
+                                Text("Authoritative review (educational)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                // Other tiers - fallback display
+                                Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.blue)
+                                    .lineLimit(2)
+                                
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                if let tier = citation.citationTier {
+                                    Text(tier.displayLabel)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else {
+                    // Non-clickable fallback (acceptable for Tier 2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if citation.citationTier == .verifiedPrimary {
+                            // Tier 1: Journal • Year only
+                            HStack {
+                                Text(citation.displayJournal)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("•")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayYear)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text(citation.citationTier?.displayLabel ?? "Primary research (peer-reviewed)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else if citation.citationTier == .authoritativeReview {
+                            // Tier 2: Journal • Year only (no ingredient/nutrient/outcome)
+                            HStack {
+                                Text(citation.displayJournal)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("•")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayYear)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Authoritative review (educational)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else {
+                            // Other tiers - fallback display
+                            Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Text("\(citation.displayJournal) (\(citation.displayYear))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if let tier = citation.citationTier {
+                                Text(tier.displayLabel)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+        }
+    }
+    
     private func healthInfoContent(_ info: HealthInfo) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             // Summary
@@ -4765,7 +5133,26 @@ struct HealthDetailView: View {
             
             // Research Evidence - Only display if verified
             if info.isVerified {
-                if !info.researchEvidence.isEmpty {
+                // Research Sources Section (clickable citations)
+                if let citations = info.citations, !citations.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Research Sources")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(citations) { citation in
+                            CitationRowView(citation: citation)
+                        }
+                        
+                        // App Store compliant disclaimer
+                        Text("This information is for educational purposes only and is not medical advice.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .padding(.top, 4)
+                    }
+                } else if !info.researchEvidence.isEmpty {
+                    // Fallback to text display if citations not available
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Research Evidence")
                             .font(.headline)
@@ -4774,21 +5161,6 @@ struct HealthDetailView: View {
                         ForEach(info.researchEvidence, id: \.self) { evidence in
                             Text("• \(evidence)")
                                 .font(.body)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                // Sources
-                if !info.sources.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Sources")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        ForEach(info.sources, id: \.self) { source in
-                            Text("• \(source)")
-                                .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -4855,10 +5227,10 @@ struct HealthDetailView: View {
             
             RULE 4: Format each finding as: "[Ingredient]'s [nutrient] [specific health benefit/finding]. ([First Author] et al., [Year])"
             
-            Examples of CORRECT format:
-            - "Tomatoes' lycopene reduces cardiovascular disease risk by 26%. (Ried & Fakler, 2011)"
-            - "Spinach's lutein protects against age-related macular degeneration. (Ma et al., 2012)"
-            - "Olive oil's monounsaturated fats lower LDL cholesterol levels. (Estruch et al., 2013)"
+            Examples of CORRECT format (educational language only):
+            - "Tomatoes' lycopene is associated with cardiovascular health in research. (Ried & Fakler, 2011)"
+            - "Spinach's lutein is commonly studied in relation to vision function. (Ma et al., 2012)"
+            - "Olive oil's monounsaturated fats are part of dietary patterns researched for heart health. (Estruch et al., 2013)"
             
             Examples of INCORRECT format (DO NOT USE):
             - "Spaghetti marinara benefits heart health" (mentions recipe name)
@@ -4941,7 +5313,9 @@ struct HealthDetailView: View {
                     "year": 2021,
                     "journal": "Journal Name",
                     "doi": "10.xxxx/xxxxx or null",
-                    "pmid": "12345678 or null"
+                    "pmid": "12345678 or null",
+                    "title": "Study title or null",
+                    "url": "https://doi.org/10.xxxx/xxxxx or https://pubmed.ncbi.nlm.nih.gov/12345678/ or null"
                 }
             ]
         }
@@ -5055,29 +5429,29 @@ struct HealthDetailView: View {
         
         switch category.lowercased() {
         case "heart":
-            return "This food shows \(scoreDescription) heart health benefits with a longevity score of \(longevityScore)/100. Heart-healthy foods typically contain antioxidants, healthy fats, and nutrients that support cardiovascular function and reduce inflammation."
+            return "This food contains nutrients commonly studied in relation to heart health, with a longevity score of \(longevityScore)/100. Foods researched for heart health typically contain antioxidants, healthy fats, and nutrients that are part of dietary patterns associated with cardiovascular function."
         case "brain":
-            return "This food demonstrates \(scoreDescription) brain health benefits with a longevity score of \(longevityScore)/100. Brain-supporting foods often contain omega-3 fatty acids, antioxidants, and nutrients that enhance cognitive function and protect against age-related decline."
+            return "This food contains nutrients commonly studied in relation to brain health, with a longevity score of \(longevityScore)/100. Foods researched for brain health often contain omega-3 fatty acids, antioxidants, and nutrients that are part of dietary patterns associated with cognitive function."
         case "anti-inflam", "anti-inflammation":
-            return "This food provides \(scoreDescription) anti-inflammatory benefits with a longevity score of \(longevityScore)/100. Anti-inflammatory foods typically contain compounds that help reduce chronic inflammation, which is linked to many age-related diseases."
+            return "This food contains nutrients commonly studied in relation to inflammation, with a longevity score of \(longevityScore)/100. Foods researched for inflammation typically contain compounds that are part of dietary patterns associated with normal inflammatory function."
         case "bones", "joints", "bones & joints":
-            return "This food offers \(scoreDescription) bone and joint health benefits with a longevity score of \(longevityScore)/100. Bone-supporting foods typically contain calcium, vitamin D, magnesium, and other nutrients essential for maintaining bone density and joint health."
+            return "This food contains nutrients commonly studied in relation to bone and joint health, with a longevity score of \(longevityScore)/100. Foods researched for bone health typically contain calcium, vitamin D, magnesium, and other nutrients that are part of dietary patterns associated with bone function."
         case "weight", "weight management":
-            return "This food supports \(scoreDescription) weight management with a longevity score of \(longevityScore)/100. Weight-friendly foods typically provide satiety, stable blood sugar, and metabolic support while being nutrient-dense and low in empty calories."
+            return "This food contains nutrients commonly studied in relation to weight management, with a longevity score of \(longevityScore)/100. Foods researched for weight management typically provide satiety-supporting nutrients and are part of dietary patterns associated with metabolic function."
         case "blood sugar":
-            return "This food shows \(scoreDescription) blood sugar regulation benefits with a longevity score of \(longevityScore)/100. Blood sugar-friendly foods typically have a low glycemic index and contain fiber, protein, and healthy fats that help maintain stable glucose levels."
+            return "This food contains nutrients commonly studied in relation to blood sugar, with a longevity score of \(longevityScore)/100. Foods researched for blood sugar typically have a low glycemic index and contain fiber, protein, and healthy fats that are part of dietary patterns associated with glucose metabolism."
         case "energy":
-            return "This food provides \(scoreDescription) energy support with a longevity score of \(longevityScore)/100. Energy-boosting foods typically contain B vitamins, iron, complex carbohydrates, and other nutrients that support cellular energy production and reduce fatigue."
+            return "This food contains nutrients commonly studied in relation to energy, with a longevity score of \(longevityScore)/100. Foods researched for energy typically contain B vitamins, iron, complex carbohydrates, and other nutrients that are part of dietary patterns associated with energy metabolism."
         case "immune":
-            return "This food offers \(scoreDescription) immune system support with a longevity score of \(longevityScore)/100. Immune-supporting foods typically contain vitamin C, zinc, antioxidants, and other nutrients that help strengthen the body's natural defense mechanisms."
+            return "This food contains nutrients commonly studied in relation to immune function, with a longevity score of \(longevityScore)/100. Foods researched for immune health typically contain vitamin C, zinc, antioxidants, and other nutrients that are part of dietary patterns associated with immune function."
         case "sleep":
-            return "This food supports \(scoreDescription) sleep quality with a longevity score of \(longevityScore)/100. Sleep-promoting foods typically contain magnesium, tryptophan, melatonin precursors, and other nutrients that help regulate sleep-wake cycles."
+            return "This food contains nutrients commonly studied in relation to sleep, with a longevity score of \(longevityScore)/100. Foods researched for sleep typically contain magnesium, tryptophan, melatonin precursors, and other nutrients that are part of dietary patterns associated with sleep function."
         case "skin":
-            return "This food provides \(scoreDescription) skin health benefits with a longevity score of \(longevityScore)/100. Skin-supporting foods typically contain antioxidants, healthy fats, and nutrients that promote collagen production and protect against oxidative damage."
+            return "This food contains nutrients commonly studied in relation to skin health, with a longevity score of \(longevityScore)/100. Foods researched for skin health typically contain antioxidants, healthy fats, and nutrients that are part of dietary patterns associated with skin function."
         case "stress":
-            return "This food offers \(scoreDescription) stress management support with a longevity score of \(longevityScore)/100. Stress-reducing foods typically contain adaptogens, B vitamins, magnesium, and other nutrients that help the body cope with stress and maintain balance."
+            return "This food contains nutrients commonly studied in relation to stress, with a longevity score of \(longevityScore)/100. Foods researched for stress typically contain adaptogens, B vitamins, magnesium, and other nutrients that are part of dietary patterns associated with stress function."
         default:
-            return "This food shows \(scoreDescription) \(category.lowercased()) benefits with a longevity score of \(longevityScore)/100. While specific research details are temporarily unavailable, the overall nutritional profile suggests positive health impacts for this category."
+            return "This food contains nutrients commonly studied in relation to \(category.lowercased()), with a longevity score of \(longevityScore)/100. While specific research details are temporarily unavailable, the overall nutritional profile contains nutrients that are part of dietary patterns researched for this category."
         }
     }
     
@@ -5135,159 +5509,160 @@ struct HealthDetailView: View {
         return ingredients.first?.name
     }
     
+    // CRITICAL: Use educational language only - no medical claims, no treatment/prevention language
     private func getCategorySpecificPrompt(category: String, foodName: String) -> String {
         switch category {
         case "Heart":
             return """
-            Analyze how \(foodName) specifically benefits heart health. Focus on:
-            - Effects on blood pressure, cholesterol levels, and cardiovascular function
-            - Specific compounds that protect heart muscle and blood vessels
-            - Research on heart disease prevention and cardiovascular outcomes
-            - Impact on heart rhythm, arterial health, and cardiac performance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to heart health. Focus on:
+            - Nutrients present that are researched for cardiovascular function
+            - Dietary patterns associated with heart health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to heart function
             """
             
         case "Brain":
             return """
-            Analyze how \(foodName) specifically benefits brain health and cognitive function. Focus on:
-            - Effects on memory, focus, and cognitive performance
-            - Neuroprotective compounds and brain cell health
-            - Research on neurodegenerative disease prevention
-            - Impact on mood, mental clarity, and brain energy metabolism
+            Analyze nutrients in \(foodName) that are commonly studied in relation to brain health. Focus on:
+            - Nutrients present that are researched for cognitive function
+            - Dietary patterns associated with brain health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to brain function
             """
             
         case "Anti-Inflam":
             return """
-            Analyze how \(foodName) specifically reduces inflammation throughout the body. Focus on:
-            - Anti-inflammatory compounds and their mechanisms
-            - Effects on inflammatory markers and cytokines
-            - Research on chronic inflammation reduction
-            - Impact on inflammatory conditions and pain relief
+            Analyze nutrients in \(foodName) that are commonly studied in relation to inflammation. Focus on:
+            - Nutrients and compounds present in the food
+            - Research associations with inflammatory markers
+            - Dietary patterns researched for inflammation
+            - Educational context about nutrient presence (do NOT describe mechanisms as outcomes)
             """
             
         case "Joints":
             return """
-            Analyze how \(foodName) specifically benefits joint health and mobility. Focus on:
-            - Effects on cartilage health and joint lubrication
-            - Anti-inflammatory benefits for joints
-            - Research on arthritis prevention and management
-            - Impact on joint flexibility, pain reduction, and mobility
+            Analyze nutrients in \(foodName) that are commonly studied in relation to joint health. Focus on:
+            - Nutrients present that are researched for joint function
+            - Dietary patterns associated with joint health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to joint function
             """
             
         case "Eyes", "Vision":
             return """
-            Analyze how \(foodName) specifically benefits eye health and vision. Focus on:
-            - Effects on retinal health and visual acuity
-            - Protective compounds for eye tissues
-            - Research on age-related eye disease prevention
-            - Impact on vision clarity, eye strain, and ocular health
+            Analyze nutrients in \(foodName) that are commonly studied in relation to eye health. Focus on:
+            - Nutrients present that are researched for vision function
+            - Dietary patterns associated with eye health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to vision
             """
             
         case "Weight":
             return """
-            Analyze how \(foodName) specifically supports weight management and metabolism. Focus on:
-            - Effects on appetite regulation and satiety
-            - Impact on metabolic rate and fat burning
-            - Research on weight loss and maintenance
-            - Effects on body composition and energy balance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to weight management. Focus on:
+            - Nutrients present that are researched for satiety and metabolism
+            - Dietary patterns associated with weight management
+            - Research context about nutrient presence (do NOT describe weight loss outcomes)
+            - Educational information about nutrients linked to satiety
             """
             
         case "Blood Sugar":
             return """
-            Analyze how \(foodName) specifically affects blood sugar regulation and diabetes prevention. Focus on:
-            - Effects on insulin sensitivity and glucose metabolism
-            - Impact on blood sugar spikes and glycemic control
-            - Research on diabetes prevention and management
-            - Effects on pancreatic function and glucose absorption
+            Analyze nutrients in \(foodName) that are commonly studied in relation to blood sugar. Focus on:
+            - Nutrients present that are researched for glucose metabolism
+            - Dietary patterns associated with blood sugar regulation
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to blood sugar function
             """
             
         case "Energy":
             return """
-            Analyze how \(foodName) specifically boosts energy levels and vitality. Focus on:
-            - Effects on cellular energy production and metabolism
-            - Impact on physical and mental stamina
-            - Research on fatigue reduction and endurance
-            - Effects on mitochondrial function and ATP production
+            Analyze nutrients in \(foodName) that are commonly studied in relation to energy. Focus on:
+            - Nutrients present that are researched for energy metabolism
+            - Dietary patterns associated with energy function
+            - Research context about nutrient presence (do NOT describe mechanisms as outcomes)
+            - Educational information about nutrients linked to energy
             """
             
         case "Immune":
             return """
-            Analyze how \(foodName) specifically strengthens the immune system. Focus on:
-            - Effects on immune cell function and production
-            - Impact on infection resistance and recovery
-            - Research on immune system enhancement
-            - Effects on inflammatory response and immune regulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to immune function. Focus on:
+            - Nutrients present that are researched for immune health
+            - Dietary patterns associated with immune function
+            - Research context about nutrient presence (do NOT describe enhancement or treatment)
+            - Educational information about nutrients linked to immune function
             """
             
         case "Sleep":
             return """
-            Analyze how \(foodName) specifically improves sleep quality and regulation. Focus on:
-            - Effects on sleep hormones and circadian rhythm
-            - Impact on sleep onset and duration
-            - Research on sleep quality improvement
-            - Effects on relaxation and stress reduction for better sleep
+            Analyze nutrients in \(foodName) that are commonly studied in relation to sleep. Focus on:
+            - Nutrients present that are researched for sleep function
+            - Dietary patterns associated with sleep
+            - Research context about nutrient presence (do NOT describe improvement or treatment)
+            - Educational information about nutrients linked to sleep
             """
             
         case "Skin":
             return """
-            Analyze how \(foodName) specifically benefits skin health and appearance. Focus on:
-            - Effects on collagen production and skin elasticity
-            - Impact on skin hydration and texture
-            - Research on anti-aging and skin protection
-            - Effects on skin repair and damage prevention
+            Analyze nutrients in \(foodName) that are commonly studied in relation to skin health. Focus on:
+            - Nutrients present that are researched for skin function
+            - Dietary patterns associated with skin health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to skin function
             """
             
         case "Stress":
             return """
-            Analyze how \(foodName) specifically helps manage stress and promotes relaxation. Focus on:
-            - Effects on stress hormones and nervous system
-            - Impact on anxiety reduction and mood stabilization
-            - Research on stress management and mental health
-            - Effects on cortisol levels and stress response
+            Analyze nutrients in \(foodName) that are commonly studied in relation to stress. Focus on:
+            - Nutrients present that are researched for stress response
+            - Dietary patterns associated with stress management
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to stress function
             """
             
         case "Kidneys":
             return """
-            Analyze how \(foodName) specifically benefits kidney health and function. Focus on:
-            - Effects on kidney filtration and waste removal
-            - Impact on blood pressure and fluid balance
-            - Research on kidney disease prevention
-            - Effects on kidney function and protection
+            Analyze nutrients in \(foodName) that are commonly studied in relation to kidney health. Focus on:
+            - Nutrients present that are researched for kidney function
+            - Dietary patterns associated with kidney health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to kidney function
             """
             
         case "Detox/Liver":
             return """
-            Analyze how \(foodName) specifically supports liver health and detoxification. Focus on:
-            - Effects on liver enzyme function and detox pathways
-            - Impact on toxin processing and elimination
-            - Research on liver disease prevention
-            - Effects on liver health and regeneration
+            Analyze nutrients in \(foodName) that are commonly studied in relation to liver health. Focus on:
+            - Nutrients present that are researched for liver function
+            - Dietary patterns associated with liver health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to liver function
             """
             
         case "Mood":
             return """
-            Analyze how \(foodName) specifically benefits mood and mental well-being. Focus on:
-            - Effects on neurotransmitters and brain chemistry
-            - Impact on depression and anxiety
-            - Research on mood regulation and mental health
-            - Effects on emotional balance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to mood. Focus on:
+            - Nutrients present that are researched for mood function
+            - Dietary patterns associated with mood
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to mood
             """
             
         case "Allergies":
             return """
-            Analyze how \(foodName) specifically affects allergy symptoms and immune response. Focus on:
-            - Effects on histamine response and inflammation
-            - Impact on allergic reactions and symptoms
-            - Research on allergy management and prevention
-            - Effects on immune system modulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to allergies. Focus on:
+            - Nutrients present that are researched for immune response
+            - Dietary patterns associated with allergy response
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to immune function
             """
             
         default:
             return """
-            Analyze how \(foodName) specifically affects \(category.lowercased()) health. Focus on:
-            - Direct effects on \(category.lowercased()) function and health
-            - Specific compounds that benefit \(category.lowercased()) health
-            - Research on \(category.lowercased()) health outcomes
-            - Impact on \(category.lowercased()) performance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to \(category.lowercased()). Focus on:
+            - Nutrients present that are researched for \(category.lowercased()) function
+            - Dietary patterns associated with \(category.lowercased())
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to \(category.lowercased())
             """
         }
     }
@@ -5774,7 +6149,7 @@ struct QualityIndicatorRow: View {
                 stress: 85,
                 weightManagement: 85
             ),
-            keyBenefits: ["High in antioxidants", "Supports heart health", "Boosts energy"],
+            keyBenefits: ["High in antioxidants", "Contains nutrients linked to heart health", "Contains nutrients linked to energy"],
             ingredients: [
                 FoodIngredient(name: "Sample Ingredient", impact: "Positive", explanation: "Good for health")
             ],

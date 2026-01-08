@@ -48,20 +48,47 @@ class CrossrefValidator {
             let pubAuthors = extractAuthors(from: message)
             let pubJournal = extractJournal(from: message)
             
-            // Verify match
-            if let year = pubYear, year != citation.year {
-                return .rejected("Year mismatch: expected \(citation.year), found \(year)")
+            // Extract registry metadata (REQUIRED for Tier 1)
+            guard let registryJournal = pubJournal, !registryJournal.isEmpty else {
+                return .rejected("Registry metadata unavailable: journal name missing")
             }
             
+            guard let registryYear = pubYear else {
+                return .rejected("Registry metadata unavailable: publication year missing")
+            }
+            
+            // Verify match (allow ±1 year tolerance) - but we'll use registry year
+            let yearDiff = abs(registryYear - citation.year)
+            if yearDiff > 1 {
+                return .rejected("Year mismatch: expected \(citation.year)±1, found \(registryYear)")
+            }
+            
+            // Verify author matches (for credibility check)
             if let authors = pubAuthors, !authorsMatch(authors, citation.authors) {
                 return .rejected("Author mismatch")
             }
             
-            if let journal = pubJournal, !journalMatches(journal, citation.journal) {
-                return .rejected("Journal mismatch")
+            // Extract title from registry
+            let registryTitle = extractTitle(from: message)
+            let url = "https://doi.org/\(doi)"
+            
+            // Verify URL resolves (basic check)
+            let urlResolves = await verifyURLResolves(url)
+            if !urlResolves {
+                return .rejected("DOI URL does not resolve")
             }
             
-            return .verified
+            // Create registry metadata
+            let metadata = RegistryMetadata(
+                journal: registryJournal,
+                year: registryYear,
+                title: registryTitle
+            )
+            
+            // This is Tier 1: Verified Primary Research
+            print("🔬 CrossrefValidator: Citation VERIFIED as VERIFIED_PRIMARY - DOI: \(doi), Registry Journal: \(registryJournal), Registry Year: \(registryYear)")
+            print("🔬 CrossrefValidator: Using registry-sourced metadata for verified citation")
+            return .verified(.verifiedPrimary, metadata)
             
         } catch {
             return .rejected("API error: \(error.localizedDescription)")
@@ -102,6 +129,36 @@ class CrossrefValidator {
             return journal
         }
         return nil
+    }
+    
+    private static func extractTitle(from data: [String: Any]) -> String? {
+        if let titles = data["title"] as? [String],
+           let title = titles.first {
+            return title
+        }
+        return nil
+    }
+    
+    /// Verify URL resolves (basic HEAD request check)
+    private static func verifyURLResolves(_ urlString: String) async -> Bool {
+        guard let url = URL(string: urlString) else {
+            return false
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5.0
+        
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                return httpResponse.statusCode == 200
+            }
+        } catch {
+            return false
+        }
+        
+        return false
     }
     
     private static func authorsMatch(_ pubAuthors: String, _ citationAuthors: String) -> Bool {

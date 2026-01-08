@@ -46,20 +46,47 @@ class PubMedValidator {
             let pubAuthors = extractAuthors(from: pmidData)
             let pubJournal = extractJournal(from: pmidData)
             
-            // Verify match
-            if let year = pubYear, year != citation.year {
-                return .rejected("Year mismatch: expected \(citation.year), found \(year)")
+            // Extract registry metadata (REQUIRED for Tier 1)
+            guard let registryJournal = pubJournal, !registryJournal.isEmpty else {
+                return .rejected("Registry metadata unavailable: journal name missing")
             }
             
+            guard let registryYear = pubYear else {
+                return .rejected("Registry metadata unavailable: publication year missing")
+            }
+            
+            // Verify match (allow ±1 year tolerance) - but we'll use registry year
+            let yearDiff = abs(registryYear - citation.year)
+            if yearDiff > 1 {
+                return .rejected("Year mismatch: expected \(citation.year)±1, found \(registryYear)")
+            }
+            
+            // Verify author matches (for credibility check)
             if let authors = pubAuthors, !authorsMatch(authors, citation.authors) {
                 return .rejected("Author mismatch")
             }
             
-            if let journal = pubJournal, !journalMatches(journal, citation.journal) {
-                return .rejected("Journal mismatch")
+            // Extract title from registry
+            let registryTitle = extractTitle(from: pmidData)
+            let url = "https://pubmed.ncbi.nlm.nih.gov/\(pmid)/"
+            
+            // Verify URL resolves (basic check)
+            let urlResolves = await verifyURLResolves(url)
+            if !urlResolves {
+                return .rejected("PMID URL does not resolve")
             }
             
-            return .verified
+            // Create registry metadata
+            let metadata = RegistryMetadata(
+                journal: registryJournal,
+                year: registryYear,
+                title: registryTitle
+            )
+            
+            // This is Tier 1: Verified Primary Research
+            print("🔬 PubMedValidator: Citation VERIFIED as VERIFIED_PRIMARY - PMID: \(pmid), Registry Journal: \(registryJournal), Registry Year: \(registryYear)")
+            print("🔬 PubMedValidator: Using registry-sourced metadata for verified citation")
+            return .verified(.verifiedPrimary, metadata)
             
         } catch {
             return .rejected("API error: \(error.localizedDescription)")
@@ -90,6 +117,32 @@ class PubMedValidator {
         return data["source"] as? String
     }
     
+    private static func extractTitle(from data: [String: Any]) -> String? {
+        return data["title"] as? String
+    }
+    
+    /// Verify URL resolves (basic HEAD request check)
+    private static func verifyURLResolves(_ urlString: String) async -> Bool {
+        guard let url = URL(string: urlString) else {
+            return false
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5.0
+        
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                return httpResponse.statusCode == 200
+            }
+        } catch {
+            return false
+        }
+        
+        return false
+    }
+    
     private static func authorsMatch(_ pubAuthors: String, _ citationAuthors: String) -> Bool {
         // Normalize and compare - allow partial matches
         let pubNormalized = pubAuthors.lowercased().trimmingCharacters(in: .whitespaces)
@@ -110,7 +163,7 @@ class PubMedValidator {
 }
 
 enum VerificationResult {
-    case verified
+    case verified(CitationTier, RegistryMetadata?)
     case rejected(String)
     
     var isVerified: Bool {
@@ -118,5 +171,19 @@ enum VerificationResult {
             return true
         }
         return false
+    }
+    
+    var tier: CitationTier? {
+        if case .verified(let tier, _) = self {
+            return tier
+        }
+        return nil
+    }
+    
+    var metadata: RegistryMetadata? {
+        if case .verified(_, let metadata) = self {
+            return metadata
+        }
+        return nil
     }
 }

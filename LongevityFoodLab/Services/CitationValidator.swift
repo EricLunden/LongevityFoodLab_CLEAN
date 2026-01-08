@@ -38,16 +38,17 @@ class CitationValidator {
     }
     
     /// Validates citation format before API verification
+    /// For Tier 1: requires DOI or PMID
+    /// For Tier 2: requires URL (DOI/PMID optional)
     static func validateFormat(_ citation: ResearchCitation) -> ValidationResult {
         // Check required fields
         guard hasRequiredFields(citation) else {
             return .invalid("Missing required fields")
         }
         
-        // Must have DOI or PMID
-        guard citation.canBeVerified else {
-            return .invalid("Citation missing DOI or PMID - cannot be verified")
-        }
+        // For Tier 1 verification: must have DOI or PMID
+        // For Tier 2 verification: URL is sufficient (checked separately)
+        // This validator only checks format, not tier assignment
         
         // Validate DOI format if present
         if let doi = citation.doi, !doi.isEmpty {
@@ -64,6 +65,18 @@ class CitationValidator {
         }
         
         return .valid
+    }
+    
+    /// Validates citation has minimum requirements for any tier
+    static func hasMinimumRequirements(_ citation: ResearchCitation) -> Bool {
+        // Tier 1: Must have DOI or PMID
+        let hasIdentifier = (citation.doi != nil && !citation.doi!.isEmpty) ||
+                           (citation.pmid != nil && !citation.pmid!.isEmpty)
+        
+        // Tier 2: Must have journal or institution name (URL optional)
+        let hasJournal = !citation.journal.isEmpty
+        
+        return hasIdentifier || hasJournal
     }
 }
 

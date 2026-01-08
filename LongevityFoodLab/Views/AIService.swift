@@ -162,7 +162,9 @@ class AIService {
     
     /// Makes an OpenAI API request and extracts the response text
     /// Returns the JSON string from the API response, ready for parsing
-    private func makeOpenAIRequest(prompt: String, timeout: TimeInterval = 30.0, completion: @escaping (Result<String, Error>) -> Void) {
+    private func makeOpenAIRequest(prompt: String, timeout: TimeInterval = 30.0, retryCount: Int = 0, maxRetries: Int = 1, completion: @escaping (Result<String, Error>) -> Void) {
+        let startTime = Date()
+        
         guard let url = URL(string: SecureConfig.openAIBaseURL) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
@@ -191,7 +193,26 @@ class AIService {
         }
         
         URLSession.shared.dataTask(with: request) { data, response, error in
+            let duration = Date().timeIntervalSince(startTime)
+            
             if let error = error {
+                let nsError = error as NSError
+                let isTransient = self.isTransientError(nsError)
+                
+                // Instrumentation log
+                print("🔍 AIService: Request failed - errorType: \(nsError.domain), code: \(nsError.code), duration: \(String(format: "%.2f", duration))s, retryCount: \(retryCount), isTransient: \(isTransient)")
+                
+                // Retry logic for transient failures
+                if isTransient && retryCount < maxRetries {
+                    let jitteredDelay = Double.random(in: 0.5...1.5) // 0.5-1.5 second jitter
+                    print("🔄 AIService: Retrying request after \(String(format: "%.2f", jitteredDelay))s delay (attempt \(retryCount + 1)/\(maxRetries + 1))")
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + jitteredDelay) {
+                        self.makeOpenAIRequest(prompt: prompt, timeout: timeout, retryCount: retryCount + 1, maxRetries: maxRetries, completion: completion)
+                    }
+                    return
+                }
+                
                 completion(.failure(error))
                 return
             }
@@ -202,7 +223,25 @@ class AIService {
                     if let data = data, let errorString = String(data: data, encoding: .utf8) {
                         print("AIService: OpenAI error response: \(errorString)")
                     }
-                    completion(.failure(NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: nil)))
+                    
+                    let httpError = NSError(domain: "HTTP Error", code: httpResponse.statusCode, userInfo: nil)
+                    let isTransient = self.isTransientHTTPError(httpResponse.statusCode)
+                    
+                    // Instrumentation log
+                    print("🔍 AIService: HTTP error - statusCode: \(httpResponse.statusCode), duration: \(String(format: "%.2f", duration))s, retryCount: \(retryCount), isTransient: \(isTransient)")
+                    
+                    // Retry logic for transient HTTP errors
+                    if isTransient && retryCount < maxRetries {
+                        let jitteredDelay = Double.random(in: 0.5...1.5)
+                        print("🔄 AIService: Retrying HTTP request after \(String(format: "%.2f", jitteredDelay))s delay (attempt \(retryCount + 1)/\(maxRetries + 1))")
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + jitteredDelay) {
+                            self.makeOpenAIRequest(prompt: prompt, timeout: timeout, retryCount: retryCount + 1, maxRetries: maxRetries, completion: completion)
+                        }
+                        return
+                    }
+                    
+                    completion(.failure(httpError))
                     return
                 }
             }
@@ -234,14 +273,48 @@ class AIService {
                         cleanedText = jsonLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                     }
                     
+                    // Success log
+                    if retryCount > 0 {
+                        print("✅ AIService: Request succeeded after retry - duration: \(String(format: "%.2f", duration))s, retryCount: \(retryCount)")
+                    }
+                    
                     completion(.success(cleanedText))
                 } else {
+                    // Decoding error - don't retry
+                    print("🔍 AIService: Invalid response format - duration: \(String(format: "%.2f", duration))s, retryCount: \(retryCount)")
                     completion(.failure(NSError(domain: "Invalid response format", code: 0, userInfo: nil)))
                 }
             } catch {
+                // Decoding error - don't retry
+                print("🔍 AIService: JSON parsing error - duration: \(String(format: "%.2f", duration))s, retryCount: \(retryCount), error: \(error)")
                 completion(.failure(error))
             }
         }.resume()
+    }
+    
+    // Helper to determine if an error is transient and should be retried
+    private func isTransientError(_ error: NSError) -> Bool {
+        // Network errors (timeout, connection lost, etc.)
+        if error.domain == NSURLErrorDomain {
+            switch error.code {
+            case NSURLErrorTimedOut,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorNotConnectedToInternet,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorDNSLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+    
+    // Helper to determine if an HTTP status code is transient and should be retried
+    private func isTransientHTTPError(_ statusCode: Int) -> Bool {
+        // 5xx server errors and 429 rate limit
+        return statusCode >= 500 && statusCode < 600 || statusCode == 429
     }
     
     // Test function to verify API connectivity
@@ -319,7 +392,7 @@ class AIService {
     }
     
     func analyzeFoodWithProfile(_ foodName: String, healthProfile: UserHealthProfile?, completion: @escaping (Result<FoodAnalysis, Error>) -> Void) {
-        analyzeFoodWithProfile(foodName, healthProfile: healthProfile, timeout: 30.0, completion: completion)
+        analyzeFoodWithProfile(foodName, healthProfile: healthProfile, timeout: 45.0, completion: completion)
     }
     
     func analyzeFoodWithProfile(_ foodName: String, healthProfile: UserHealthProfile?, timeout: TimeInterval, completion: @escaping (Result<FoodAnalysis, Error>) -> Void) {
@@ -332,7 +405,7 @@ class AIService {
         })
     }
     
-    private func performAnalysis(foodName: String, healthProfile: UserHealthProfile?, timeout: TimeInterval = 30.0, completion: @escaping (Result<FoodAnalysis, Error>) -> Void) {
+    private func performAnalysis(foodName: String, healthProfile: UserHealthProfile?, timeout: TimeInterval = 45.0, completion: @escaping (Result<FoodAnalysis, Error>) -> Void) {
         
         // Extract health goals text for personalization
         let healthGoalsText: String
@@ -431,19 +504,26 @@ class AIService {
         "This dessert packs 65g of sugar—triggering a glucose spike 3x higher than your body can efficiently process. Save it for special occasions if weight loss is your goal."
 
         Salmon Bowl (Score: 92):
-        "Wild salmon's 3g omega-3s combined with kale's sulforaphane activate cellular repair pathways that peak 4 hours after eating—perfect timing for your \(healthGoalsText) goals. This satisfying combination keeps you full for hours while delivering exceptional flavor."
+        "Wild salmon's 3g omega-3s combined with kale's sulforaphane are nutrients commonly studied in relation to cellular function—part of dietary patterns researched for \(healthGoalsText). This satisfying combination keeps you full for hours while delivering exceptional flavor."
 
         McDonald's Big Mac (Score: 38):
-        "With 563 calories and only 2g of fiber, this meal will leave you hungry again in 90 minutes while the 33g of processed fat disrupts your metabolic health targets."
+        "With 563 calories and only 2g of fiber, this meal provides limited satiety, while the 33g of processed fat offers minimal nutrients associated with metabolic health."
 
         Green Smoothie (Score: 81):
-        "Your smoothie's 8g of fiber slows sugar absorption by 40%, while spinach's folate boosts cellular energy production—directly supporting your \(healthGoalsText) goals. This refreshing blend is easy to enjoy daily and keeps you satisfied."
+        "Your smoothie's 8g of fiber supports normal digestion, while spinach's folate plays a role in energy metabolism—nutrients linked to \(healthGoalsText). This refreshing blend is easy to enjoy daily and keeps you satisfied."
 
         Pizza Slice (Score: 52):
         "Each slice delivers 285 calories but zero longevity nutrients, plus refined flour that ages your cells faster than whole grains would."
 
         FORMAT:
-        [Specific fact with number about MAIN INGREDIENTS] + [Direct biological impact] + [Connection to their goal if relevant]
+        [Specific fact with number about MAIN INGREDIENTS] + [Nutrient presence and research context] + [Connection to their goal if relevant]
+        
+        LANGUAGE CONSTRAINTS (CRITICAL - APP STORE COMPLIANCE):
+        - Use educational, descriptive language only
+        - Allowed: "supports normal function", "associated with", "contains nutrients linked to", "plays a role in", "commonly studied in relation to", "part of dietary patterns researched for"
+        - Prohibited: "improves", "treats", "prevents", "reduces disease risk", "enhances", "suppresses", "activates pathways", "boosts production"
+        - Do NOT describe biological mechanisms as outcomes
+        - Frame benefits as nutrient presence, not functional performance
 
         PRIORITIZATION RULE:
         - Always focus on the largest/most substantial components of the meal

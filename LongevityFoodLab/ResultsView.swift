@@ -3650,89 +3650,98 @@ struct ResultsView: View {
     
     // MARK: - Supplement Health Goals Grid (Always Visible)
     
+    // Helper function to map profile goal names to health score categories for supplements
+    // Returns mapping even if score is -1 (to ensure all selected goals render)
+    private func mapProfileGoalToCategoryForSupplements(_ goal: String) -> (category: String, icon: String, label: String, score: Int)? {
+        let normalized = normalizeHealthGoal(goal)
+        
+        switch normalized {
+        case "heart health":
+            return ("Heart", "❤️", "Heart\nHealth", currentAnalysis.healthScores.heartHealth)
+        case "brain health":
+            return ("Brain", "🧠", "Brain\nHealth", currentAnalysis.healthScores.brainHealth)
+        case "weight management":
+            return ("Weight", "⚖️", "Weight", currentAnalysis.healthScores.weightManagement)
+        case "immune support":
+            return ("Immune", "🛡️", "Immune", currentAnalysis.healthScores.immune)
+        case "blood sugar", "blood_sugar":
+            return ("Blood Sugar", "🩸", "Blood Sugar", currentAnalysis.healthScores.bloodSugar)
+        case "energy":
+            return ("Energy", "⚡", "Energy", currentAnalysis.healthScores.energy)
+        case "sleep quality", "sleep":
+            return ("Sleep", "😴", "Sleep", currentAnalysis.healthScores.sleep)
+        case "stress management", "stress":
+            return ("Stress", "🧘", "Stress", currentAnalysis.healthScores.stress)
+        case "skin health", "skin":
+            return ("Skin", "✨", "Skin", currentAnalysis.healthScores.skin)
+        case "joint health", "joints":
+            return ("Joints", "🦴", "Joint\nHealth", currentAnalysis.healthScores.jointHealth)
+        case "bone/muscle health", "bone muscle health", "bones muscle health":
+            return ("Joints", "🦴", "Bones &\nJoints", currentAnalysis.healthScores.jointHealth)
+        case "digestive health", "digestive":
+            return ("Detox/Liver", "🧪", "Detox/\nLiver", currentAnalysis.healthScores.detoxLiver)
+        case "hormonal balance", "hormonal":
+            return ("Mood", "😊", "Mood", currentAnalysis.healthScores.mood)
+        default:
+            // Try partial matching for Blood Sugar
+            if normalized.contains("blood") && normalized.contains("sugar") {
+                return ("Blood Sugar", "🩸", "Blood Sugar", currentAnalysis.healthScores.bloodSugar)
+            }
+            return nil
+        }
+    }
+    
     @ViewBuilder
     var supplementHealthGoalsGrid: some View {
+        let userHealthGoals = healthProfileManager.getHealthGoals()
+        
+        // Map user-selected goals to categories (always returns mapping, even if score is -1)
+        let filteredGoals = userHealthGoals.compactMap { mapProfileGoalToCategoryForSupplements($0) }
+        
         VStack(alignment: .leading, spacing: 12) {
             Text("🔬 Research For Your Health Goals")
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
             
-            // 3x2 Grid of health score boxes (tappable)
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 12) {
-                TappableHealthScoreBox(icon: "❤️", label: "Heart\nHealth", score: currentAnalysis.healthScores.heartHealth, category: "Heart", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Heart", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        // Use cached research if available, otherwise load
-                        if let cached = loadedHealthGoalResearch[category] {
-                            healthGoalResearch = cached
-                        } else {
-                            loadHealthGoalResearch(for: category, score: score)
-                        }
+            if filteredGoals.isEmpty {
+                // If no user goals selected, show message
+                Text("Select health goals in your profile to see personalized research.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                // 3-column grid matching Supplements style - use user-selected goals
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 12) {
+                    ForEach(filteredGoals, id: \.category) { goal in
+                        TappableHealthScoreBox(
+                            icon: goal.icon,
+                            label: goal.label,
+                            score: goal.score,
+                            category: goal.category,
+                            analysis: currentAnalysis,
+                            isExpanded: expandedHealthGoal?.category == goal.category,
+                            onTap: { category, score in
+                                if expandedHealthGoal?.category == category {
+                                    expandedHealthGoal = nil
+                                    healthGoalResearch = nil
+                                } else {
+                                    expandedHealthGoal = (category, score)
+                                    // Use cached research if available, otherwise load
+                                    if let cached = loadedHealthGoalResearch[category] {
+                                        healthGoalResearch = cached
+                                    } else {
+                                        loadHealthGoalResearch(for: category, score: score)
+                                    }
+                                }
+                            }
+                        )
                     }
-                })
-                TappableHealthScoreBox(icon: "🧠", label: "Brain\nHealth", score: currentAnalysis.healthScores.brainHealth, category: "Brain", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Brain", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        // Use cached research if available, otherwise load
-                        if let cached = loadedHealthGoalResearch[category] {
-                            healthGoalResearch = cached
-                        } else {
-                            loadHealthGoalResearch(for: category, score: score)
-                        }
-                    }
-                })
-                TappableHealthScoreBox(icon: "💪", label: "Energy", score: currentAnalysis.healthScores.energy, category: "Energy", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Energy", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        // Use cached research if available, otherwise load
-                        if let cached = loadedHealthGoalResearch[category] {
-                            healthGoalResearch = cached
-                        } else {
-                            loadHealthGoalResearch(for: category, score: score)
-                        }
-                    }
-                })
-                TappableHealthScoreBox(icon: "😴", label: "Sleep", score: currentAnalysis.healthScores.sleep, category: "Sleep", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Sleep", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
-                    }
-                })
-                TappableHealthScoreBox(icon: "🛡️", label: "Immune", score: currentAnalysis.healthScores.immune, category: "Immune", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Immune", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
-                    }
-                })
-                TappableHealthScoreBox(icon: "🦴", label: "Joint\nHealth", score: currentAnalysis.healthScores.jointHealth, category: "Joints", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Joints", onTap: { category, score in
-                    if expandedHealthGoal?.category == category {
-                        expandedHealthGoal = nil
-                        healthGoalResearch = nil
-                    } else {
-                        expandedHealthGoal = (category, score)
-                        loadHealthGoalResearch(for: category, score: score)
-                    }
-                })
+                }
             }
             
             // Show research panel if expanded

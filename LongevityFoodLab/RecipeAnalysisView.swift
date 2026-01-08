@@ -428,59 +428,150 @@ struct RecipeAnalysisView: View {
         .padding(.horizontal, 20)
     }
     
-    private var healthScoresGrid: some View {
-        VStack(alignment: .center, spacing: 15) {
-            Text("Latest Health Goals Research")
-                .font(.headline)
-                .fontWeight(.semibold)
-                .multilineTextAlignment(.center)
-            
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 12) {
-                healthScoreItem("🤧", "Allergies", analysis.healthScores.allergies)
-                healthScoreItem("🛡️", "Anti-Inflam", analysis.healthScores.antiInflammation)
-                healthScoreItem("🩸", "Blood Sugar", analysis.healthScores.bloodSugar)
-                healthScoreItem("🧠", "Brain", analysis.healthScores.brainHealth)
-                healthScoreItem("🧪", "Detox/Liver", analysis.healthScores.detoxLiver)
-                healthScoreItem("⚡", "Energy", analysis.healthScores.energy)
-                healthScoreItem("👁️", "Vision", analysis.healthScores.eyeHealth)
-                healthScoreItem("❤️", "Heart", analysis.healthScores.heartHealth)
-                healthScoreItem("🛡️", "Immune", analysis.healthScores.immune)
-                healthScoreItem("🦴", "Bones & Joints", analysis.healthScores.jointHealth)
-                healthScoreItem("🫘", "Kidneys", analysis.healthScores.kidneys)
-                healthScoreItem("😊", "Mood", analysis.healthScores.mood)
-                healthScoreItem("✨", "Skin", analysis.healthScores.skin)
-                healthScoreItem("😴", "Sleep", analysis.healthScores.sleep)
-                healthScoreItem("🧘", "Stress", analysis.healthScores.stress)
-                healthScoreItem("⚖️", "Weight", analysis.healthScores.weightManagement)
-            }
+    // Normalize profile goal names to canonical identifiers
+    private func normalizeHealthGoal(_ goal: String) -> String {
+        let goalLower = goal.lowercased().trimmingCharacters(in: .whitespaces)
+        
+        // Handle Blood Sugar variants
+        if goalLower.contains("blood") && goalLower.contains("sugar") {
+            return "blood_sugar"
         }
-        .padding(.vertical, 20)
-        .padding(.horizontal, 20)
-        .background(colorScheme == .dark ? Color.black : Color(UIColor.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+        if goalLower.contains("glycemic") || goalLower.contains("glucose") {
+            return "blood_sugar"
+        }
+        
+        // Handle other common variants
+        let normalized = goalLower
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        
+        return normalized
     }
     
-    private func healthScoreItem(_ icon: String, _ label: String, _ score: Int) -> some View {
-        Button(action: {
-            healthDetailItem = HealthDetailItem(category: label, score: score)
-        }) {
-            VStack(spacing: 8) {
-                Text(icon)
-                    .font(.largeTitle)
-                
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Text("\(score)")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(scoreColor(score))
+    // Helper function to map profile goal names to health score category names
+    // Returns mapping even if score is -1 (to ensure all selected goals render)
+    private func mapProfileGoalToCategory(_ goal: String) -> (category: String, icon: String, label: String, score: Int)? {
+        let normalized = normalizeHealthGoal(goal)
+        
+        switch normalized {
+        case "heart health":
+            return ("Heart", "❤️", "Heart\nHealth", analysis.healthScores.heartHealth)
+        case "brain health":
+            return ("Brain", "🧠", "Brain\nHealth", analysis.healthScores.brainHealth)
+        case "weight management":
+            return ("Weight", "⚖️", "Weight", analysis.healthScores.weightManagement)
+        case "immune support":
+            return ("Immune", "🛡️", "Immune", analysis.healthScores.immune)
+        case "blood sugar", "blood_sugar":
+            return ("Blood Sugar", "🩸", "Blood Sugar", analysis.healthScores.bloodSugar)
+        case "energy":
+            return ("Energy", "⚡", "Energy", analysis.healthScores.energy)
+        case "sleep quality", "sleep":
+            return ("Sleep", "😴", "Sleep", analysis.healthScores.sleep)
+        case "stress management", "stress":
+            return ("Stress", "🧘", "Stress", analysis.healthScores.stress)
+        case "skin health", "skin":
+            return ("Skin", "✨", "Skin", analysis.healthScores.skin)
+        case "joint health", "joints":
+            return ("Joints", "🦴", "Joint\nHealth", analysis.healthScores.jointHealth)
+        case "bone/muscle health", "bone muscle health", "bones muscle health":
+            return ("Joints", "🦴", "Bones &\nJoints", analysis.healthScores.jointHealth)
+        case "digestive health", "digestive":
+            return ("Detox/Liver", "🧪", "Detox/\nLiver", analysis.healthScores.detoxLiver)
+        case "hormonal balance", "hormonal":
+            return ("Mood", "😊", "Mood", analysis.healthScores.mood)
+        default:
+            // Try partial matching for Blood Sugar
+            if normalized.contains("blood") && normalized.contains("sugar") {
+                return ("Blood Sugar", "🩸", "Blood Sugar", analysis.healthScores.bloodSugar)
             }
-            .padding(10)
+            return nil
         }
-        .buttonStyle(PlainButtonStyle())
+    }
+    
+    @ViewBuilder
+    private var healthScoresGrid: some View {
+        let userHealthGoals = healthProfileManager.getHealthGoals()
+        
+        // Map user-selected goals to categories (always returns mapping, even if score is -1)
+        let filteredGoals = userHealthGoals.compactMap { mapProfileGoalToCategory($0) }
+        
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Research For Your Health Goals")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            
+            if filteredGoals.isEmpty {
+                Text("Select health goals in your profile to see personalized research.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                // 3-column grid matching Supplements style
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 12) {
+                    ForEach(filteredGoals, id: \.category) { goal in
+                        TappableHealthScoreBox(
+                            icon: goal.icon,
+                            label: goal.label,
+                            score: goal.score,
+                            category: goal.category,
+                            onTap: { category, score in
+                                if score != -1 {
+                                    healthDetailItem = HealthDetailItem(category: goal.label, score: score)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    // Tappable health score box matching Supplements style (gray cards)
+    private struct TappableHealthScoreBox: View {
+        let icon: String
+        let label: String
+        let score: Int
+        let category: String
+        let onTap: (String, Int) -> Void
+        
+        var body: some View {
+            Button(action: {
+                onTap(category, score)
+            }) {
+                VStack(spacing: 4) {
+                    Text(icon)
+                        .font(.title2)
+                    Text(label)
+                        .font(.caption2)
+                        .multilineTextAlignment(.center)
+                    if score == -1 {
+                        Text("—")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                    } else {
+                        Text("\(score)")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray5))
+                .cornerRadius(8)
+            }
+            .disabled(score == -1)
+            .buttonStyle(PlainButtonStyle())
+        }
     }
     
     private var ingredientsAnalysisDropdown: some View {

@@ -147,7 +147,17 @@ struct SupplementScanGridCard: View {
     }
     
     private func loadImage() {
-        cachedImage = FoodCacheManager.shared.loadImage(forHash: entry.imageHash)
+        if let imageHash = entry.imageHash {
+            print("🔍 SupplementScanGridCard: Loading image for hash: \(imageHash.prefix(16))..., product: \(entry.foodName)")
+            cachedImage = FoodCacheManager.shared.loadImage(forHash: imageHash)
+            if cachedImage == nil {
+                print("🔍 SupplementScanGridCard: WARNING - Image not found for hash: \(imageHash.prefix(16))..., product: \(entry.foodName)")
+            } else {
+                print("🔍 SupplementScanGridCard: Successfully loaded image for hash: \(imageHash.prefix(16))...")
+            }
+        } else {
+            print("🔍 SupplementScanGridCard: WARNING - entry.imageHash is nil for product: \(entry.foodName)")
+        }
     }
     
     // Gradient that runs from red to green based on score

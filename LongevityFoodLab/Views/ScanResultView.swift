@@ -35,6 +35,12 @@ struct ScanResultView: View {
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var foodCacheManager = FoodCacheManager.shared
     
+    // Computed property to detect if displaying supplement
+    var isSupplementScan: Bool {
+        guard let analysis = analysis else { return false }
+        return analysis.scanType == "supplement" || analysis.scanType == "supplement_facts" || scanType == .supplement || scanType == .supplement_facts
+    }
+    
     var body: some View {
         ZStack {
             // Captured image as background (visible around edges)
@@ -317,8 +323,16 @@ struct ScanResultView: View {
                             
                             // Combined Health Goals + Healthier Choices (ALWAYS RENDERS because Health Goals has content)
                             VStack(spacing: 16) {
-                                // Health Goals Section (always renders - has content)
-                                healthGoalsSection(analysis: analysis)
+                                // Health Goals Section
+                                if isSupplementScan {
+                                    // For supplements: Show health goals evaluation icons
+                                    if let evaluations = analysis.healthGoalsEvaluation, !evaluations.isEmpty {
+                                        supplementHealthGoalsIcons(evaluations: evaluations)
+                                    }
+                                } else {
+                                    // For groceries/meals: Show regular health goals section
+                                    healthGoalsSection(analysis: analysis)
+                                }
                                 
                                 // Healthier Choices Section (part of same VStack, so modifiers always fire)
                                 VStack(alignment: .leading, spacing: 12) {
@@ -333,7 +347,7 @@ struct ScanResultView: View {
                                         .padding(.vertical, 12)
                                         .frame(maxWidth: .infinity)
                                     } else if !grocerySuggestions.isEmpty {
-                                        Text("Healthier Choices:")
+                                        Text("Higher Scoring Supplements:")
                                             .font(.headline)
                                             .fontWeight(.semibold)
                                             .foregroundColor(.primary)
@@ -1132,9 +1146,10 @@ struct ScanResultView: View {
             
             // Reason for higher score
             Text(suggestion.reason)
-                .font(.caption)
-                .foregroundColor(.primary)
-                .lineLimit(2)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
             
             // Key benefits
             if !suggestion.keyBenefits.isEmpty {
@@ -1363,6 +1378,151 @@ struct ScanResultView: View {
             return false
         }
         return dietaryPreference.lowercased().contains("keto")
+    }
+    
+    // MARK: - Supplement Health Goals Icons (Simple Display)
+    
+    private func supplementHealthGoalsIcons(evaluations: [HealthGoalEvaluation]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Health Goals:")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            VStack(alignment: .leading, spacing: 6) {
+                // Show ALL evaluations (not just some)
+                ForEach(evaluations) { eval in
+                    HStack(spacing: 8) {
+                        Image(systemName: iconForStatus(score: eval.score))
+                            .foregroundColor(colorForStatus(score: eval.score))
+                            .font(.system(size: 16))
+                        Text(eval.goal)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    // Helper functions for icon and color based on score thresholds
+    private func iconForStatus(score: Int) -> String {
+        if score >= 60 {
+            return "checkmark.circle.fill"  // ✅ Supports
+        } else if score >= 40 {
+            return "exclamationmark.triangle.fill"  // ⚠️ Limited
+        } else {
+            return "xmark.circle.fill"  // ❌ Does not support
+        }
+    }
+    
+    private func colorForStatus(score: Int) -> Color {
+        if score >= 60 {
+            return .green
+        } else if score >= 40 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+}
+
+// MARK: - Supplement Ingredient Row
+
+struct SupplementIngredientRow: View {
+    let ingredient: IngredientAnalysis
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Name and amount
+            HStack {
+                Image(systemName: "checkmark.square.fill")
+                    .foregroundColor(.green)
+                Text("\(ingredient.name) — \(ingredient.amount)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            
+            // Brief summary (under name, above research bar)
+            Text(ingredient.briefSummary)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            // Research rating bar
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Human Research Support Rating")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(ingredient.researchScore)/100")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                }
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 8)
+                            .cornerRadius(4)
+                        
+                        Rectangle()
+                            .fill(researchBarColor(for: ingredient.researchScore))
+                            .frame(width: geometry.size.width * CGFloat(ingredient.researchScore) / 100, height: 8)
+                            .cornerRadius(4)
+                    }
+                }
+                .frame(height: 8)
+                
+                // Rating text (under the bar)
+                Text(ingredient.researchRating)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    func researchBarColor(for score: Int) -> Color {
+        switch score {
+        case 90...100: return .green
+        case 75...89: return .blue
+        case 60...74: return .cyan
+        case 40...59: return .yellow
+        case 20...39: return .orange
+        default: return .red
+        }
+    }
+}
+
+// MARK: - Drug Interaction Row
+
+struct DrugInteractionRow: View {
+    let interaction: DrugInteraction
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: interaction.severity == "serious" ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(interaction.severity == "serious" ? .red : .orange)
+                Text(interaction.drugCategory)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            
+            Text(interaction.interaction)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
     }
 }
 

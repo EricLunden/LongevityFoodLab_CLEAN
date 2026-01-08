@@ -7,6 +7,9 @@ struct HealthDetailItem: Identifiable {
     let score: Int
 }
 
+// Health goal research info for supplements (defined before ResultsView for accessibility)
+// HealthGoalResearchInfo moved to ResearchCitation.swift
+
 struct ResultsView: View {
     let analysis: FoodAnalysis
     let onNewSearch: () -> Void
@@ -24,6 +27,10 @@ struct ResultsView: View {
     @State private var cachedImage: UIImage? = nil
     @State private var isFavorite: Bool = false
     @State private var cachedEntry: FoodCacheEntry? = nil
+    
+    // Cache fallback state for unavailable analysis
+    @State private var cachedFallbackAnalysis: FoodAnalysis? = nil
+    @State private var cachedFallbackDate: Date? = nil
     
     // Progressive loading state
     @State private var loadedKeyBenefits: [String]? = nil
@@ -46,6 +53,33 @@ struct ResultsView: View {
     // Supplement suggestions state
     @State private var supplementSuggestions: [GrocerySuggestion]? = nil
     @State private var isLoadingSupplementSuggestions = false
+    
+    // Secondary API loading state (for supplements)
+    @State private var secondaryLoaded = false
+    @State private var isLoadingSecondary = false
+    
+    // Dropdown expansion state for supplements
+    @State private var isSupplementKeyBenefitsExpanded = false
+    @State private var isSupplementIngredientsExpanded = false
+    @State private var isDrugInteractionsExpanded = false
+    @State private var isDosageExpanded = false
+    @State private var isSafetyExpanded = false
+    @State private var isQualityExpanded = false
+    @State private var isSimilarExpanded = false
+    
+    // Health goal research state
+    @State private var expandedHealthGoal: (category: String, score: Int)? = nil
+    @State private var healthGoalResearch: HealthGoalResearchInfo? = nil
+    @State private var isLoadingHealthGoalResearch = false
+    
+    // Lazy-loading state for health goals research cards
+    @State private var loadedHealthGoalResearch: [String: HealthGoalResearchInfo] = [:]
+    @State private var loadingHealthGoalResearch: Set<String> = []
+    
+    // Computed property to detect supplements
+    var isSupplementScan: Bool {
+        analysis.scanType == "supplement" || analysis.scanType == "supplement_facts" || isSupplement
+    }
     
     // Target mode state (for tracker-style dropdowns)
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
@@ -70,6 +104,44 @@ struct ResultsView: View {
     @State private var showingServingSizeEditor = false
     @State private var servingSizeInput: String = ""
     @State private var currentServingSize: String = ""
+    @State private var currentAnalysis: FoodAnalysis
+    
+    init(analysis: FoodAnalysis, onNewSearch: @escaping () -> Void, isSupplement: Bool = false, onMealAdded: (() -> Void)? = nil) {
+        self.analysis = analysis
+        self.onNewSearch = onNewSearch
+        self.isSupplement = isSupplement
+        self.onMealAdded = onMealAdded
+        _currentAnalysis = State(initialValue: analysis)
+    }
+    
+    // Check cache for fallback when analysis is unavailable
+    private func checkCacheForFallback() {
+        // Only check cache if current analysis is unavailable
+        guard analysis.overallScore == -1 else { return }
+        
+        // Try to find cached analysis for the same food
+        if let cachedAnalysis = foodCacheManager.getCachedAnalysis(for: analysis.foodName),
+           cachedAnalysis.overallScore != -1 {
+            // Find the cache entry to get the date
+            let matchingEntries = foodCacheManager.cachedAnalyses.filter { entry in
+                FoodAnalysis.normalizeInput(entry.foodName) == FoodAnalysis.normalizeInput(analysis.foodName)
+            }
+            
+            if let entry = matchingEntries.sorted(by: { $0.analysisDate > $1.analysisDate }).first {
+                cachedFallbackAnalysis = cachedAnalysis
+                cachedFallbackDate = entry.analysisDate
+                currentAnalysis = cachedAnalysis
+                print("🔍 ResultsView: Using cached fallback analysis for \(analysis.foodName), dated \(entry.analysisDate)")
+            }
+        }
+    }
+    
+    // Format cache date for display
+    private func formatCacheDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
     
     // Parse serving size to get multiplier (e.g., "2 slices" -> 2.0, "1 cup" -> 1.0, "0.5 cups" -> 0.5)
     private func parseServingSizeMultiplier(_ servingSize: String) -> Double {
@@ -123,17 +195,6 @@ struct ResultsView: View {
     private var micronutrientTargetMode: TargetMode {
         get { TargetMode(rawValue: micronutrientTargetModeRaw) ?? .standardRDA }
         set { micronutrientTargetModeRaw = newValue.rawValue }
-    }
-    
-    // Current analysis with loaded data
-    @State private var currentAnalysis: FoodAnalysis
-    
-    init(analysis: FoodAnalysis, onNewSearch: @escaping () -> Void, isSupplement: Bool = false, onMealAdded: (() -> Void)? = nil) {
-        self.analysis = analysis
-        self.onNewSearch = onNewSearch
-        self.isSupplement = isSupplement
-        self.onMealAdded = onMealAdded
-        _currentAnalysis = State(initialValue: analysis)
     }
     
     var body: some View {
@@ -265,19 +326,33 @@ struct ResultsView: View {
                     
                     // Summary text with optional longevity reassurance
                     VStack(spacing: 8) {
-                        Text(analysis.summary)
+                        Text(currentAnalysis.summary)
                             .font(.body)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(nil)
                         
+                        // Show "Last updated" indicator if using cached fallback
+                        if cachedFallbackAnalysis != nil, let cacheDate = cachedFallbackDate {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.6))
+                                Text("Last updated: \(formatCacheDate(cacheDate))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.6))
+                            }
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 4)
+                        }
+                        
                         // Longevity-population reassurance (only for qualifying high-quality meals)
-                        if analysis.qualifiesForLongevityReassurance {
+                        if currentAnalysis.qualifiesForLongevityReassurance {
                             HStack(spacing: 6) {
                                 Image(systemName: "leaf.fill")
                                     .font(.caption)
                                     .foregroundColor(.secondary.opacity(0.7))
-                                Text(analysis.longevityReassurancePhrase)
+                                Text(currentAnalysis.longevityReassurancePhrase)
                                     .font(.caption)
                                     .foregroundColor(.secondary.opacity(0.8))
                                     .italic()
@@ -287,45 +362,55 @@ struct ResultsView: View {
                         }
                     }
                     
-                    // Key Benefits dropdown
-                    keyBenefitsDropdown
-                    
-                    // Longevity Goals grid (existing - only calls API when item tapped)
-                    healthScoresGrid
-                    
-                    // Healthier Choices (only for scanned products) - moved up below Health Goals grid
+                    // For supplements: Health Goals Grid (always visible) + Dropdowns (load on tap)
+                    // For groceries/meals: Existing structure
                     let isGrocery = analysis.scanType == "product" || analysis.scanType == "nutrition_label"
-                    if isGrocery {
-                        HealthierChoicesView(analysis: currentAnalysis)
-                    }
                     
-                    // Ingredients Analysis dropdown (renamed from Nutritional Components Analysis)
-                    ingredientsAnalysisDropdown
-                    
-                    // Your Macronutrients dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        macrosDropdownTrackerStyle
-                    }
-                    
-                    // Your Micronutrients dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        microsDropdownTrackerStyle
-                    }
-                    
-                    // Quality & Source dropdown (hidden for groceries only)
-                    if !isGrocery {
-                        QualitySourceView(foodName: analysis.foodName)
-                    }
-                    
-                    // Best Practices dropdown (if available)
-                    let bestPrep = currentAnalysis.bestPreparationOrDefault
-                    if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
-                        bestPracticesDropdown
-                    }
-                    
-                    // Similar Supplements with Higher Scores (only for supplements)
-                    if isSupplement {
-                        similarSupplementsSection
+                    if isSupplementScan {
+                        // Health Goals Grid (ALWAYS VISIBLE - not a dropdown)
+                        supplementHealthGoalsGrid
+                        
+                        Divider()
+                            .padding(.vertical, 8)
+                        
+                        // Supplement dropdowns (all load via ONE secondary API call)
+                        supplementDropdowns
+                    } else {
+                        // Existing structure for groceries/meals
+                        // Key Benefits dropdown
+                        keyBenefitsDropdown
+                        
+                        // Longevity Goals grid (existing - only calls API when item tapped)
+                        healthScoresGrid
+                        
+                        // Healthier Choices (only for scanned products) - moved up below Health Goals grid
+                        if isGrocery {
+                            HealthierChoicesView(analysis: currentAnalysis)
+                        }
+                        
+                        // Ingredients Analysis dropdown (renamed from Nutritional Components Analysis)
+                        ingredientsAnalysisDropdown
+                        
+                        // Your Macronutrients dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            macrosDropdownTrackerStyle
+                        }
+                        
+                        // Your Micronutrients dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            microsDropdownTrackerStyle
+                        }
+                        
+                        // Quality & Source dropdown (hidden for groceries only)
+                        if !isGrocery {
+                            QualitySourceView(foodName: analysis.foodName)
+                        }
+                        
+                        // Best Practices dropdown (if available)
+                        let bestPrep = currentAnalysis.bestPreparationOrDefault
+                        if !bestPrep.isEmpty && !isHealthierChoicesText(bestPrep) {
+                            bestPracticesDropdown
+                        }
                     }
                     
                     // Add to Meal Tracker and Evaluate Another Food buttons (hidden for groceries and supplements)
@@ -379,7 +464,9 @@ struct ResultsView: View {
             }
         }
         .onAppear {
+            checkCacheForFallback()
             loadImage()
+            lazyLoadTopHealthGoals()
             
             // Ensure currentAnalysis has the latest cached data including suggestions
             // Refresh from cache to get the most up-to-date suggestions
@@ -3483,6 +3570,1313 @@ struct ResultsView: View {
             }
         }
     }
+    
+    // MARK: - Supplement Health Goals Grid (Always Visible)
+    
+    @ViewBuilder
+    var supplementHealthGoalsGrid: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("🔬 Research For Your Health Goals")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            
+            // 3x2 Grid of health score boxes (tappable)
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 12) {
+                TappableHealthScoreBox(icon: "❤️", label: "Heart\nHealth", score: currentAnalysis.healthScores.heartHealth, category: "Heart", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Heart", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
+                    }
+                })
+                TappableHealthScoreBox(icon: "🧠", label: "Brain\nHealth", score: currentAnalysis.healthScores.brainHealth, category: "Brain", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Brain", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
+                    }
+                })
+                TappableHealthScoreBox(icon: "💪", label: "Energy", score: currentAnalysis.healthScores.energy, category: "Energy", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Energy", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        // Use cached research if available, otherwise load
+                        if let cached = loadedHealthGoalResearch[category] {
+                            healthGoalResearch = cached
+                        } else {
+                            loadHealthGoalResearch(for: category, score: score)
+                        }
+                    }
+                })
+                TappableHealthScoreBox(icon: "😴", label: "Sleep", score: currentAnalysis.healthScores.sleep, category: "Sleep", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Sleep", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        loadHealthGoalResearch(for: category, score: score)
+                    }
+                })
+                TappableHealthScoreBox(icon: "🛡️", label: "Immune", score: currentAnalysis.healthScores.immune, category: "Immune", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Immune", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        loadHealthGoalResearch(for: category, score: score)
+                    }
+                })
+                TappableHealthScoreBox(icon: "🦴", label: "Joint\nHealth", score: currentAnalysis.healthScores.jointHealth, category: "Joints", analysis: currentAnalysis, isExpanded: expandedHealthGoal?.category == "Joints", onTap: { category, score in
+                    if expandedHealthGoal?.category == category {
+                        expandedHealthGoal = nil
+                        healthGoalResearch = nil
+                    } else {
+                        expandedHealthGoal = (category, score)
+                        loadHealthGoalResearch(for: category, score: score)
+                    }
+                })
+            }
+            
+            // Show research panel if expanded
+            if let expanded = expandedHealthGoal, let research = healthGoalResearch {
+                HealthGoalResearchPanel(
+                    category: expanded.category,
+                    score: expanded.score,
+                    summary: research.summary,
+                    researchEvidence: research.researchEvidence,
+                    sources: research.sources,
+                    isVerified: research.isVerified,
+                    citations: research.citations
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let expanded = expandedHealthGoal, isLoadingHealthGoalResearch {
+                VStack {
+                    ProgressView()
+                    Text("Loading research...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    private struct HealthScoreBox: View {
+        let icon: String
+        let label: String
+        let score: Int
+        
+        var body: some View {
+            VStack(spacing: 4) {
+                Text(icon)
+                    .font(.title2)
+                Text(label)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+                Text("\(score)")
+                    .font(.title3)
+                    .fontWeight(.bold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray5))
+            .cornerRadius(8)
+        }
+    }
+    
+    // Tappable version for supplements
+    private struct TappableHealthScoreBox: View {
+        let icon: String
+        let label: String
+        let score: Int
+        let category: String
+        let analysis: FoodAnalysis
+        let isExpanded: Bool
+        let onTap: (String, Int) -> Void
+        
+        var body: some View {
+            Button(action: {
+                onTap(category, score)
+            }) {
+                VStack(spacing: 4) {
+                    Text(icon)
+                        .font(.title2)
+                    Text(label)
+                        .font(.caption2)
+                        .multilineTextAlignment(.center)
+                    Text("\(score)")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(isExpanded ? Color.blue.opacity(0.2) : Color(.systemGray5))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isExpanded ? Color.blue : Color.clear, lineWidth: 2)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
+    // Health Goal Research Panel
+    private struct HealthGoalResearchPanel: View {
+        let category: String
+        let score: Int
+        let summary: String
+        let researchEvidence: [String]
+        let sources: [String]
+        let isVerified: Bool  // Flag to indicate if research is verified
+        let citations: [ResearchCitation]?  // Full citation data for clickable links
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header with icon and score
+                HStack {
+                    Text(iconForCategory(category))
+                        .font(.title2)
+                    Text("\(category) — \(score)/100")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                
+                Divider()
+                
+                // Summary
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                
+                // Research Evidence - Only display if verified
+                if isVerified {
+                    // Research Sources Section (clickable citations)
+                    if let citations = citations, !citations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Research Sources")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            ForEach(citations) { citation in
+                                HealthGoalCitationRowView(citation: citation)
+                            }
+                            
+                            // App Store compliant disclaimer
+                            Text("This information is for educational purposes only and is not medical advice.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                                .padding(.top, 4)
+                        }
+                    } else if !researchEvidence.isEmpty {
+                        // Fallback to text display if citations not available
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Research Evidence:")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.secondary)
+                            
+                            ForEach(researchEvidence, id: \.self) { evidence in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                        .foregroundColor(.secondary)
+                                    Text(evidence)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Legacy research suppressed
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No verified human research available.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .onAppear {
+                                if !researchEvidence.isEmpty {
+                                    print("Legacy research evidence suppressed — verification required")
+                                }
+                            }
+                    }
+                }
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
+        }
+        
+        // Citation Row View for clickable citations (within HealthGoalResearchPanel)
+        private struct HealthGoalCitationRowView: View {
+            let citation: ResearchCitation
+            
+            var body: some View {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Tier 1: Clickable (DOI/PMID links)
+                    // Tier 2: Non-clickable by default (App Store compliance)
+                    if citation.citationTier == .verifiedPrimary, let urlString = citation.displayURL, let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                // Tier 1: Journal • Year only (UNCHANGED)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                }
+                                
+                                // Tier label
+                                Text("Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } else {
+                        // Non-clickable display (Tier 2 or Tier 1 without URL)
+                        VStack(alignment: .leading, spacing: 4) {
+                            if citation.citationTier == .verifiedPrimary {
+                                // Tier 1: Journal • Year only
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                                Text("Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if citation.citationTier == .authoritativeReview {
+                                // Tier 2: Journal • Year only (non-clickable, educational)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                                Text("Authoritative review (educational)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                // Other tiers - fallback display
+                                Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayJournal) (\(citation.displayYear))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                if let tier = citation.citationTier {
+                                    Text(tier.displayLabel)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Color(.systemGray6))
+                .cornerRadius(6)
+            }
+        }
+        
+        func iconForCategory(_ category: String) -> String {
+            switch category.lowercased() {
+            case "heart": return "❤️"
+            case "brain": return "🧠"
+            case "energy": return "💪"
+            case "sleep": return "😴"
+            case "immune": return "🛡️"
+            case "joints": return "🦴"
+            default: return "🔬"
+            }
+        }
+    }
+    
+    // MARK: - Supplement Dropdowns (Load on Tap)
+    
+    @ViewBuilder
+    var supplementDropdowns: some View {
+        VStack(spacing: 16) {
+            // Key Benefits
+            StyledSupplementDropdown(
+                title: "Key Benefits",
+                icon: "star.fill",
+                borderColor: Color.yellow,
+                gradientColors: [Color.yellow, Color.orange],
+                isExpanded: $isSupplementKeyBenefitsExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let benefits = currentAnalysis.keyBenefits, !benefits.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(benefits, id: \.self) { benefit in
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text(benefit)
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+                        .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isSupplementKeyBenefitsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Ingredients Analysis
+            StyledSupplementDropdown(
+                title: "Ingredients Analysis",
+                icon: "flask.fill",
+                borderColor: Color.blue,
+                gradientColors: [Color.blue, Color.cyan],
+                isExpanded: $isSupplementIngredientsExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let ingredientAnalyses = currentAnalysis.ingredientAnalyses, !ingredientAnalyses.isEmpty {
+                        VStack(spacing: 12) {
+                            ForEach(ingredientAnalyses) { ingredient in
+                                SupplementIngredientRow(ingredient: ingredient)
+                            }
+                        }
+                        .padding()
+                    } else if let ingredients = currentAnalysis.ingredients, !ingredients.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(ingredients.enumerated()), id: \.offset) { index, ingredient in
+                                HStack {
+                                    Image(systemName: "checkmark.square.fill")
+                                        .foregroundColor(.green)
+                                    Text(ingredient.name)
+                                }
+                                .font(.subheadline)
+                            }
+                            
+                            Button(action: { loadSecondaryIfNeeded() }) {
+                                HStack {
+                                    Image(systemName: "arrow.down.circle")
+                                    Text("Load research ratings")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            }
+                            .padding(.top, 8)
+                        }
+                        .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isSupplementIngredientsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Drug Interactions
+            StyledSupplementDropdown(
+                title: "Drug Interactions",
+                icon: "pills.fill",
+                borderColor: Color.purple,
+                gradientColors: [Color.purple, Color.pink],
+                isExpanded: $isDrugInteractionsExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let interactions = currentAnalysis.drugInteractions, !interactions.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(interactions) { interaction in
+                                DrugInteractionRow(interaction: interaction)
+                            }
+                            
+                            Text("List is for information only and may not be complete. Always ask your doctor before taking any supplement regularly.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        }
+                        .padding()
+                    } else if secondaryLoaded {
+                        Text("No known drug interactions identified.")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isDrugInteractionsExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Dosage Analysis
+            StyledSupplementDropdown(
+                title: "Dosage Analysis",
+                icon: "chart.bar.fill",
+                borderColor: Color.orange,
+                gradientColors: [Color.orange, Color.yellow],
+                isExpanded: $isDosageExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let details = currentAnalysis.secondaryDetails, !details.dosageAnalyses.isEmpty {
+                        VStack(spacing: 12) {
+                            ForEach(details.dosageAnalyses) { dosage in
+                                DosageAnalysisRow(dosage: dosage)
+                            }
+                        }
+                        .padding()
+                    } else if secondaryLoaded {
+                        Text("No dosage analysis available.")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isDosageExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Safety & Warnings
+            StyledSupplementDropdown(
+                title: "Safety & Warnings",
+                icon: "exclamationmark.triangle.fill",
+                borderColor: Color.red,
+                gradientColors: [Color.red, Color.orange],
+                isExpanded: $isSafetyExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let details = currentAnalysis.secondaryDetails, !details.safetyWarnings.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(details.safetyWarnings) { warning in
+                                SafetyWarningRow(warning: warning)
+                            }
+                            
+                            Text("This is not medical advice. Consult your healthcare provider before starting any supplement.")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        }
+                        .padding()
+                    } else if secondaryLoaded {
+                        Text("No specific warnings identified.")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isSafetyExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Quality Indicators
+            StyledSupplementDropdown(
+                title: "Quality Indicators",
+                icon: "checkmark.seal.fill",
+                borderColor: Color.green,
+                gradientColors: [Color.green, Color.mint],
+                isExpanded: $isQualityExpanded,
+                isLoading: isLoadingSecondary,
+                content: {
+                    if let details = currentAnalysis.secondaryDetails, !details.qualityIndicators.isEmpty {
+                        VStack(spacing: 12) {
+                            ForEach(details.qualityIndicators) { indicator in
+                                QualityIndicatorRow(indicator: indicator)
+                            }
+                        }
+                        .padding()
+                    } else if secondaryLoaded {
+                        Text("No quality indicators identified.")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else if !isLoadingSecondary {
+                        Text("Tap to load...")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+            )
+            .onChange(of: isQualityExpanded) { expanded in
+                if expanded { loadSecondaryIfNeeded() }
+            }
+            
+            // Higher Scoring Choices (always visible, not a dropdown)
+            higherScoringSection
+        }
+    }
+    
+    // MARK: - Higher Scoring Choices Section (Always Visible)
+    
+    @ViewBuilder
+    var higherScoringSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            HStack {
+                Image(systemName: "star.fill")
+                    .font(.title2)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.yellow, .orange],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text("Higher Scoring Choices")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            .padding(.bottom, 4)
+            
+            // Display cached suggestions (not in dropdown)
+            if let suggestions = currentAnalysis.suggestions, !suggestions.isEmpty {
+                VStack(spacing: 12) {
+                    ForEach(Array(suggestions.enumerated()), id: \.offset) { index, suggestion in
+                        SupplementSuggestionCard(suggestion: suggestion)
+                    }
+                }
+            } else {
+                Text("No higher scoring alternatives found.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+        }
+        .padding(.top, 16)
+    }
+    
+    // MARK: - Supplement Suggestion Card
+    
+    private struct SupplementSuggestionCard: View {
+        let suggestion: GrocerySuggestion
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                // Brand and score
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(suggestion.brandName)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(suggestion.productName)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                    }
+                    Spacer()
+                    // Score circle
+                    ZStack {
+                        Circle()
+                            .fill(scoreGradient(suggestion.score))
+                            .frame(width: 50, height: 50)
+                        VStack(spacing: 0) {
+                            Text("\(suggestion.score)")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            Text("Score")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+                }
+                
+                // Summary (with more lines)
+                Text(suggestion.reason)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                // Key benefits
+                if !suggestion.keyBenefits.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Key Benefits:")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        ForEach(suggestion.keyBenefits, id: \.self) { benefit in
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.caption)
+                                Text(benefit)
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                }
+                
+                // Price and availability
+                HStack {
+                    if !suggestion.priceRange.isEmpty {
+                        Text(suggestion.priceRange)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if !suggestion.availability.isEmpty {
+                        Text(suggestion.availability)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        }
+        
+        private func scoreGradient(_ score: Int) -> LinearGradient {
+            let progress = CGFloat(score) / 100.0
+            
+            let startColor: Color
+            let endColor: Color
+            
+            if progress <= 0.4 {
+                // Red to Orange
+                startColor = Color(red: 0.8, green: 0.1, blue: 0.1)
+                endColor = Color(red: 0.9, green: 0.4, blue: 0.1)
+            } else if progress <= 0.6 {
+                // Orange to Yellow
+                startColor = Color(red: 0.9, green: 0.4, blue: 0.1)
+                endColor = Color(red: 0.95, green: 0.7, blue: 0.1)
+            } else if progress <= 0.8 {
+                // Yellow to Light Green
+                startColor = Color(red: 0.95, green: 0.7, blue: 0.1)
+                endColor = Color(red: 0.502, green: 0.706, blue: 0.627)
+            } else {
+                // Light Green to Dark Green
+                startColor = Color(red: 0.502, green: 0.706, blue: 0.627)
+                endColor = Color(red: 0.42, green: 0.557, blue: 0.498)
+            }
+            
+            return LinearGradient(colors: [startColor, endColor], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
+    
+    // Styled dropdown component matching recipe style
+    private struct StyledSupplementDropdown<Content: View>: View {
+        let title: String
+        let icon: String
+        let borderColor: Color
+        let gradientColors: [Color]
+        @Binding var isExpanded: Bool
+        let isLoading: Bool
+        @ViewBuilder let content: () -> Content
+        @Environment(\.colorScheme) private var colorScheme
+        
+        var body: some View {
+            VStack(spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isExpanded.toggle()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: icon)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: gradientColors,
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
+                        
+                        Text(title)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(colorScheme == .dark ? Color.black : Color(UIColor.systemBackground))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(borderColor.opacity(colorScheme == .dark ? 1.0 : 0.6), lineWidth: colorScheme == .dark ? 1.0 : 0.5)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if isExpanded {
+                    if isLoading {
+                        ProgressView("Loading...")
+                            .padding()
+                    } else {
+                        content()
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+            }
+            .background(colorScheme == .dark ? Color.black : Color(UIColor.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+        }
+    }
+    
+    // MARK: - Secondary API Loading
+    
+    private func loadSecondaryIfNeeded() {
+        guard !secondaryLoaded && !isLoadingSecondary else { return }
+        guard isSupplementScan else { return }
+        
+        isLoadingSecondary = true
+        print("📦 SUPPLEMENT: Loading secondary details...")
+        
+        Task {
+            do {
+                let details = try await fetchSecondaryDetails(for: currentAnalysis)
+                
+                await MainActor.run {
+                    // Update currentAnalysis with secondary data
+                    currentAnalysis = FoodAnalysis(
+                        foodName: currentAnalysis.foodName,
+                        overallScore: currentAnalysis.overallScore,
+                        summary: currentAnalysis.summary,
+                        healthScores: currentAnalysis.healthScores,
+                        keyBenefits: details.keyBenefits.isEmpty ? currentAnalysis.keyBenefits : details.keyBenefits,
+                        ingredients: currentAnalysis.ingredients,
+                        bestPreparation: currentAnalysis.bestPreparation,
+                        servingSize: currentAnalysis.servingSize,
+                        nutritionInfo: currentAnalysis.nutritionInfo,
+                        scanType: currentAnalysis.scanType,
+                        foodNames: currentAnalysis.foodNames,
+                        suggestions: currentAnalysis.suggestions,
+                        dataCompleteness: currentAnalysis.dataCompleteness,
+                        analysisTimestamp: currentAnalysis.analysisTimestamp,
+                        dataSource: currentAnalysis.dataSource,
+                        ingredientAnalyses: details.ingredientAnalyses.isEmpty ? currentAnalysis.ingredientAnalyses : details.ingredientAnalyses,
+                        drugInteractions: details.drugInteractions.isEmpty ? currentAnalysis.drugInteractions : details.drugInteractions,
+                        overallResearchScore: currentAnalysis.overallResearchScore,
+                        secondaryDetails: SupplementSecondaryDetails(
+                            dosageAnalyses: details.dosageAnalyses,
+                            safetyWarnings: details.safetyWarnings,
+                            qualityIndicators: details.qualityIndicators
+                        ),
+                        healthGoalsEvaluation: currentAnalysis.healthGoalsEvaluation
+                    )
+                    
+                    secondaryLoaded = true
+                    isLoadingSecondary = false
+                    
+                    print("📦 SUPPLEMENT: Secondary details loaded")
+                    print("📦 SUPPLEMENT: - Key benefits: \(details.keyBenefits.count)")
+                    print("📦 SUPPLEMENT: - Ingredients with scores: \(details.ingredientAnalyses.count)")
+                    print("📦 SUPPLEMENT: - Drug interactions: \(details.drugInteractions.count)")
+                    print("📦 SUPPLEMENT: - Dosage analyses: \(details.dosageAnalyses.count)")
+                    print("📦 SUPPLEMENT: - Safety warnings: \(details.safetyWarnings.count)")
+                    print("📦 SUPPLEMENT: - Quality indicators: \(details.qualityIndicators.count)")
+                }
+            } catch {
+                print("📦 SUPPLEMENT: Secondary load failed: \(error)")
+                await MainActor.run {
+                    isLoadingSecondary = false
+                }
+            }
+        }
+    }
+    
+    private func fetchSecondaryDetails(for analysis: FoodAnalysis) async throws -> SecondaryDetailsResponse {
+        guard let url = URL(string: SecureConfig.openAIBaseURL) else {
+            throw NSError(domain: "Invalid URL", code: 0)
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 45.0
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(SecureConfig.openAIAPIKey)", forHTTPHeaderField: "Authorization")
+        
+        // Build ingredients list for context
+        let ingredientsList = analysis.ingredients?.map { $0.name }.joined(separator: ", ") ?? ""
+        
+        let prompt = """
+        Analyze this supplement and provide detailed information.
+        
+        Supplement: \(analysis.foodName)
+        Ingredients: \(ingredientsList)
+        
+        Return ONLY valid JSON with this structure:
+        {
+            "keyBenefits": ["benefit1", "benefit2", "benefit3", "benefit4"],
+            "ingredientAnalyses": [
+                {
+                    "name": "Full ingredient name with brand",
+                    "amount": "100mg",
+                    "form": "specific form if applicable",
+                    "researchScore": 1-100,
+                    "briefSummary": "One sentence about function and research support"
+                }
+            ],
+            "drugInteractions": [
+                {
+                    "drugCategory": "Drug category name",
+                    "interaction": "Description of interaction",
+                    "severity": "moderate or serious"
+                }
+            ],
+            "dosageAnalyses": [
+                {
+                    "ingredient": "Ingredient name",
+                    "labelDose": "100mg",
+                    "clinicalRange": "100-200mg",
+                    "verdict": "optimal, low, or high"
+                }
+            ],
+            "safetyWarnings": [
+                {
+                    "warning": "Warning text",
+                    "category": "pregnancy, nursing, surgery, sideEffect, allergy"
+                }
+            ],
+            "qualityIndicators": [
+                {
+                    "indicator": "Indicator name",
+                    "status": "positive, negative, or neutral",
+                    "detail": "Additional detail"
+                }
+            ]
+        }
+        
+        RESEARCH SCORE CRITERIA (1-100):
+        - 90-100 (Gold Standard): Large RCT OR meta-analysis OR 10+ quality studies + long history
+        - 75-89 (Strong Evidence): Multiple quality studies OR one excellent RCT OR centuries of traditional use
+        - 60-74 (Good Evidence): Several small studies + plausible mechanism
+        - 40-59 (Emerging Evidence): 1-2 small studies OR strong animal data
+        - 20-39 (Limited Evidence): Animal/cell studies only
+        - 1-19 (Insufficient Evidence): Minimal research
+        
+        Quality factors that INCREASE score:
+        - Gold-standard RCT, meta-analysis, long safe use history, well-understood mechanism
+        
+        Quality factors that DECREASE score:
+        - Only animal studies, conflicting results, small samples, industry-funded only
+        
+        DRUG INTERACTIONS: Only include clinically relevant interactions.
+        DOSAGE: Compare to ranges used in clinical research.
+        SAFETY: Include pregnancy, nursing, surgery, common side effects.
+        QUALITY: Note certifications, branded ingredients, allergens, third-party testing.
+        """
+        
+        let requestBody: [String: Any] = [
+            "model": SecureConfig.openAIModelName,
+            "max_tokens": 2000,
+            "temperature": 0.1,
+            "response_format": ["type": "json_object"],
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw NSError(domain: "HTTP Error", code: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String,
+              let contentData = content.data(using: .utf8) else {
+            throw NSError(domain: "Invalid response", code: 0)
+        }
+        
+        let details = try JSONDecoder().decode(SecondaryDetailsResponse.self, from: contentData)
+        return details
+    }
+    
+    // MARK: - Health Goal Research Loading
+    
+    private func loadHealthGoalResearch(for category: String, score: Int, storeInCache: Bool = false) {
+        // Skip if already loading or loaded
+        if loadingHealthGoalResearch.contains(category) || loadedHealthGoalResearch[category] != nil {
+            return
+        }
+        
+        // Mark as loading
+        if !storeInCache {
+            isLoadingHealthGoalResearch = true
+        }
+        loadingHealthGoalResearch.insert(category)
+        
+        Task {
+            do {
+                let ingredientsList = currentAnalysis.ingredients?.map { $0.name }.joined(separator: ", ") ?? ""
+                let categorySpecificPrompt = getCategorySpecificPrompt(category: category, foodName: currentAnalysis.foodName)
+                
+                let prompt = """
+                Analyze this supplement for \(category.lowercased()) health benefits.
+                
+                Supplement: \(currentAnalysis.foodName)
+                Ingredients: \(ingredientsList)
+                \(category) Score: \(score)/100
+                
+                \(categorySpecificPrompt)
+                
+                Generate research-based analysis:
+                
+                SUMMARY (40-60 words):
+                - Start with the score: "Scoring \(score)/100 for \(category.lowercased())..."
+                - Name specific compounds and their effects
+                - Use specific numbers (mg, %)
+                - Never use "may," "could," "potentially"
+                
+                RESEARCH EVIDENCE (2-3 bullet points):
+                - Each point links SPECIFIC INGREDIENT's SPECIFIC NUTRIENT to \(category.lowercased()) health
+                - Only cite REAL peer-reviewed studies from PubMed-indexed journals
+                - If no research exists for an ingredient, skip it
+                - NEVER mention the supplement name "\(currentAnalysis.foodName)" in research evidence - only ingredient names
+                - CRITICAL: Each citation MUST include DOI or PubMed PMID for verification
+                - If you cannot provide DOI or PMID, EXCLUDE the study entirely
+                - Do NOT guess identifiers - only include studies where you can provide accurate DOI or PMID
+                
+                Return ONLY this JSON:
+                {
+                    "summary": "40-60 word paragraph starting with score",
+                    "researchEvidence": [
+                        {
+                            "ingredient": "Ingredient name",
+                            "nutrient": "Specific nutrient",
+                            "outcome": "Health outcome finding",
+                            "authors": "First Author et al.",
+                            "year": 2021,
+                            "journal": "Journal Name",
+                            "doi": "10.xxxx/xxxxx or null",
+                            "pmid": "12345678 or null",
+                            "title": "Study title or null",
+                            "url": "https://doi.org/10.xxxx/xxxxx or https://pubmed.ncbi.nlm.nih.gov/12345678/ or null"
+                        }
+                    ]
+                }
+                
+                REQUIREMENTS:
+                - At least ONE of doi or pmid must be provided (not both null)
+                - DOI format: 10.xxxx/xxxxx
+                - PMID format: numeric, 6-8 digits
+                - If no verified studies exist, return empty researchEvidence array []
+                """
+                
+                let text = try await AIService.shared.makeOpenAIRequestAsync(prompt: prompt)
+                
+                // Process through ResearchEvidenceService for verification
+                let verifiedCitations = await ResearchEvidenceService.shared.processAIResponse(text)
+                
+                await MainActor.run {
+                    loadingHealthGoalResearch.remove(category)
+                    if !storeInCache {
+                        isLoadingHealthGoalResearch = false
+                    }
+                    
+                    // Convert verified citations to legacy format
+                    let researchInfo: HealthGoalResearchInfo
+                    if !verifiedCitations.isEmpty {
+                        let summary = extractSummary(from: text) ?? "Research supports the health benefits of this supplement for \(category.lowercased())."
+                        researchInfo = HealthGoalResearchInfo(summary: summary, verifiedCitations: verifiedCitations)
+                    } else {
+                        // No verified citations - return empty structure
+                        researchInfo = HealthGoalResearchInfo(summary: "No verified human research available for this supplement.", verifiedCitations: [])
+                    }
+                    
+                    // Store in cache if requested
+                    if storeInCache {
+                        loadedHealthGoalResearch[category] = researchInfo
+                    } else {
+                        // For tap-based loading, update the expanded state
+                        healthGoalResearch = researchInfo
+                    }
+                }
+            } catch {
+                print("❌ Error loading health goal research for \(category): \(error)")
+                await MainActor.run {
+                    loadingHealthGoalResearch.remove(category)
+                    if !storeInCache {
+                        isLoadingHealthGoalResearch = false
+                        healthGoalResearch = nil
+                    }
+                }
+            }
+        }
+    }
+    
+    // Lazy-load research for top health goals (called on screen appear)
+    private func lazyLoadTopHealthGoals() {
+        // Only load for supplements
+        guard isSupplementScan else { return }
+        
+        // Get top 3 health goals by score (highest scores first)
+        let healthGoals: [(category: String, score: Int)] = [
+            ("Heart", currentAnalysis.healthScores.heartHealth),
+            ("Brain", currentAnalysis.healthScores.brainHealth),
+            ("Energy", currentAnalysis.healthScores.energy)
+        ].sorted(by: { $0.1 > $1.1 })
+        .prefix(3)
+        .map { ($0.0, $0.1) }
+        
+        // Load research for top goals with small delays to avoid overwhelming the API
+        for (index, goal) in healthGoals.enumerated() {
+            if goal.1 > 0 { // Only load if score is valid
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.5) {
+                    self.loadHealthGoalResearch(for: goal.0, score: goal.1, storeInCache: true)
+                }
+            }
+        }
+    }
+    
+    private func extractJSONFromText(_ text: String) -> String {
+        // Look for JSON object in the text
+        if let startIndex = text.firstIndex(of: "{"),
+           let endIndex = text.lastIndex(of: "}") {
+            let jsonRange = startIndex...endIndex
+            return String(text[jsonRange])
+        }
+        return text
+    }
+    
+    /// Extracts summary from AI response JSON
+    private func extractSummary(from text: String) -> String? {
+        let jsonText = extractJSONFromText(text)
+        guard let data = jsonText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summary = json["summary"] as? String else {
+            return nil
+        }
+        return summary
+    }
+    
+    // Helper function for health goal research prompts (similar to HealthDetailView)
+    // CRITICAL: Use educational language only - no medical claims, no treatment/prevention language
+    private func getCategorySpecificPrompt(category: String, foodName: String) -> String {
+        switch category {
+        case "Heart":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to heart health. Focus on:
+            - Nutrients present that are researched for cardiovascular function
+            - Dietary patterns associated with heart health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to heart function
+            """
+            
+        case "Brain":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to brain health. Focus on:
+            - Nutrients present that are researched for cognitive function
+            - Dietary patterns associated with brain health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to brain function
+            """
+            
+        case "Anti-Inflam":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to inflammation. Focus on:
+            - Nutrients and compounds present in the food
+            - Research associations with inflammatory markers
+            - Dietary patterns researched for inflammation
+            - Educational context about nutrient presence (do NOT describe mechanisms as outcomes)
+            """
+            
+        case "Joints":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to joint health. Focus on:
+            - Nutrients present that are researched for joint function
+            - Dietary patterns associated with joint health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to joint function
+            """
+            
+        case "Eyes", "Vision":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to eye health. Focus on:
+            - Nutrients present that are researched for vision function
+            - Dietary patterns associated with eye health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to vision
+            """
+            
+        case "Weight":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to weight management. Focus on:
+            - Nutrients present that are researched for satiety and metabolism
+            - Dietary patterns associated with weight management
+            - Research context about nutrient presence (do NOT describe weight loss outcomes)
+            - Educational information about nutrients linked to satiety
+            """
+            
+        case "Blood Sugar":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to blood sugar. Focus on:
+            - Nutrients present that are researched for glucose metabolism
+            - Dietary patterns associated with blood sugar regulation
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to blood sugar function
+            """
+            
+        case "Energy":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to energy. Focus on:
+            - Nutrients present that are researched for energy metabolism
+            - Dietary patterns associated with energy function
+            - Research context about nutrient presence (do NOT describe mechanisms as outcomes)
+            - Educational information about nutrients linked to energy
+            """
+            
+        case "Immune":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to immune function. Focus on:
+            - Nutrients present that are researched for immune health
+            - Dietary patterns associated with immune function
+            - Research context about nutrient presence (do NOT describe enhancement or treatment)
+            - Educational information about nutrients linked to immune function
+            """
+            
+        case "Sleep":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to sleep. Focus on:
+            - Nutrients present that are researched for sleep function
+            - Dietary patterns associated with sleep
+            - Research context about nutrient presence (do NOT describe improvement or treatment)
+            - Educational information about nutrients linked to sleep
+            """
+            
+        case "Skin":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to skin health. Focus on:
+            - Nutrients present that are researched for skin function
+            - Dietary patterns associated with skin health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to skin function
+            """
+            
+        case "Stress":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to stress. Focus on:
+            - Nutrients present that are researched for stress response
+            - Dietary patterns associated with stress management
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to stress function
+            """
+            
+        case "Kidneys":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to kidney health. Focus on:
+            - Nutrients present that are researched for kidney function
+            - Dietary patterns associated with kidney health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to kidney function
+            """
+            
+        case "Detox/Liver":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to liver health. Focus on:
+            - Nutrients present that are researched for liver function
+            - Dietary patterns associated with liver health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to liver function
+            """
+            
+        case "Mood":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to mood. Focus on:
+            - Nutrients present that are researched for mood function
+            - Dietary patterns associated with mood
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to mood
+            """
+            
+        case "Allergies":
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to allergies. Focus on:
+            - Nutrients present that are researched for immune response
+            - Dietary patterns associated with allergy response
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to immune function
+            """
+            
+        default:
+            return """
+            Analyze nutrients in \(foodName) that are commonly studied in relation to \(category.lowercased()). Focus on:
+            - Nutrients present that are researched for \(category.lowercased()) function
+            - Dietary patterns associated with \(category.lowercased())
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to \(category.lowercased())
+            """
+        }
+    }
 }
 
 struct HealthDetailView: View {
@@ -3578,6 +4972,153 @@ struct HealthDetailView: View {
         }
     }
     
+    // Citation Row View for clickable citations
+    private struct CitationRowView: View {
+        let citation: ResearchCitation
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                // Use tier-aware displayURL (Tier 2 never links to DOI resolvers)
+                if let urlString = citation.displayURL, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            // Tier 1: Display ONLY journal and year (registry-sourced)
+                            // Tier 2: Display ONLY journal, year, and tier label (no ingredient/nutrient/outcome)
+                            if citation.citationTier == .verifiedPrimary {
+                                // Tier 1: Journal • Year only (UNCHANGED)
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                    Text("•")
+                                        .font(.subheadline)
+                                        .foregroundColor(.blue)
+                                    Text("\(citation.displayYear)")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.blue)
+                                }
+                                
+                                // Tier label
+                                Text(citation.citationTier?.displayLabel ?? "Primary research (peer-reviewed)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if citation.citationTier == .authoritativeReview {
+                                // Tier 2: Journal • Year only (no ingredient/nutrient/outcome) - non-clickable
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    Text("•")
+                                        .font(.subheadline)
+                                        .foregroundColor(.primary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                // Tier label
+                                Text("Authoritative review (educational)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                // Other tiers - fallback display
+                                Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.blue)
+                                    .lineLimit(2)
+                                
+                                HStack {
+                                    Text(citation.displayJournal)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("•")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(citation.displayYear)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                if let tier = citation.citationTier {
+                                    Text(tier.displayLabel)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else {
+                    // Non-clickable fallback (acceptable for Tier 2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if citation.citationTier == .verifiedPrimary {
+                            // Tier 1: Journal • Year only
+                            HStack {
+                                Text(citation.displayJournal)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("•")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayYear)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text(citation.citationTier?.displayLabel ?? "Primary research (peer-reviewed)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else if citation.citationTier == .authoritativeReview {
+                            // Tier 2: Journal • Year only (no ingredient/nutrient/outcome)
+                            HStack {
+                                Text(citation.displayJournal)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("•")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Text("\(citation.displayYear)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            }
+                            Text("Authoritative review (educational)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else {
+                            // Other tiers - fallback display
+                            Text("\(citation.ingredient)'s \(citation.nutrient) — \(citation.outcome)")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Text("\(citation.displayJournal) (\(citation.displayYear))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if let tier = citation.citationTier {
+                                Text(tier.displayLabel)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+        }
+    }
+    
     private func healthInfoContent(_ info: HealthInfo) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             // Summary
@@ -3590,33 +5131,52 @@ struct HealthDetailView: View {
                     .foregroundColor(.secondary)
             }
             
-            // Research Evidence
-            if !info.researchEvidence.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Research Evidence")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    ForEach(info.researchEvidence, id: \.self) { evidence in
-                        Text("• \(evidence)")
-                            .font(.body)
+            // Research Evidence - Only display if verified
+            if info.isVerified {
+                // Research Sources Section (clickable citations)
+                if let citations = info.citations, !citations.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Research Sources")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(citations) { citation in
+                            CitationRowView(citation: citation)
+                        }
+                        
+                        // App Store compliant disclaimer
+                        Text("This information is for educational purposes only and is not medical advice.")
+                            .font(.caption2)
                             .foregroundColor(.secondary)
+                            .italic()
+                            .padding(.top, 4)
+                    }
+                } else if !info.researchEvidence.isEmpty {
+                    // Fallback to text display if citations not available
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Research Evidence")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        
+                        ForEach(info.researchEvidence, id: \.self) { evidence in
+                            Text("• \(evidence)")
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
-            }
-            
-            // Sources
-            if !info.sources.isEmpty {
+            } else {
+                // Legacy research suppressed
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Sources")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    ForEach(info.sources, id: \.self) { source in
-                        Text("• \(source)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    Text("No verified human research available.")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .italic()
+                        .onAppear {
+                            if !info.researchEvidence.isEmpty {
+                                print("Legacy research evidence suppressed — verification required")
+                            }
+                        }
                 }
             }
         }
@@ -3667,10 +5227,10 @@ struct HealthDetailView: View {
             
             RULE 4: Format each finding as: "[Ingredient]'s [nutrient] [specific health benefit/finding]. ([First Author] et al., [Year])"
             
-            Examples of CORRECT format:
-            - "Tomatoes' lycopene reduces cardiovascular disease risk by 26%. (Ried & Fakler, 2011)"
-            - "Spinach's lutein protects against age-related macular degeneration. (Ma et al., 2012)"
-            - "Olive oil's monounsaturated fats lower LDL cholesterol levels. (Estruch et al., 2013)"
+            Examples of CORRECT format (educational language only):
+            - "Tomatoes' lycopene is associated with cardiovascular health in research. (Ried & Fakler, 2011)"
+            - "Spinach's lutein is commonly studied in relation to vision function. (Ma et al., 2012)"
+            - "Olive oil's monounsaturated fats are part of dietary patterns researched for heart health. (Estruch et al., 2013)"
             
             Examples of INCORRECT format (DO NOT USE):
             - "Spaghetti marinara benefits heart health" (mentions recipe name)
@@ -3719,30 +5279,18 @@ struct HealthDetailView: View {
         RESEARCH EVIDENCE SECTION (2-3 bullet points, ingredient-specific only):
         \(researchInstructions)
         - Each point must link a SPECIFIC INGREDIENT's SPECIFIC NUTRIENT to \(category.lowercased()) health
-        - Format: "[Ingredient]'s [nutrient] [specific finding]. ([First Author] et al., [Year])"
-        - CRITICAL: Only cite REAL, verifiable studies from:
-          * PubMed (peer-reviewed journals)
-          * USDA FoodData Central (for nutrient data)
-          * Blue Zones research (for dietary patterns)
-          * Mediterranean diet trials (e.g., PREDIMED)
-          * High-impact journals (Nature, Science, NEJM, JAMA, etc.)
-          * Systematic reviews (Cochrane, NESR)
+        - CRITICAL: Only cite REAL, verifiable studies from PubMed-indexed peer-reviewed journals
+        - USDA FoodData Central is for nutrient data ONLY, NOT research evidence - do NOT cite USDA as research
         - NEVER fabricate sources, author names, or study findings
         - NEVER use generic citations like "studies show" or "research indicates"
         - Ban these words: "suggests," "may," "potentially," "highlights," "indicates," "could," "might"
         - NEVER mention the recipe/meal name "\(foodName)" in research evidence - only ingredient names
-        - If no ingredient has relevant research, return empty array [] - do not include "no research" messages or placeholder citations
+        - CRITICAL: Each citation MUST include DOI or PubMed PMID for verification
+        - If you cannot provide DOI or PMID, EXCLUDE the study entirely
+        - Do NOT guess identifiers - only include studies where you can provide accurate DOI or PMID
+        - If no ingredient has relevant research with verifiable identifiers, return empty array []
         - If research is unavailable, it's better to show none than to show fake citations
         - Prioritize dietary patterns over isolated nutrient fear - focus on whole food benefits
-        
-        SOURCES SECTION (2-3 bullet points):
-        - List ONLY actual journals or studies cited in Research Evidence above
-        - Format: "• Journal Name (Year)" or "• [Author] et al., Journal Name, Year"
-        - NEVER list: Harvard Health, Mayo Clinic, NIH website, WHO website, WebMD, Healthline, Medical News Today, or any non-peer-reviewed sources
-        - CRITICAL: If Research Evidence is empty (no ingredients had relevant research), return empty array [] - do NOT write "No academic sources available" or any placeholder text
-        - Each source must correspond EXACTLY to a study cited in Research Evidence
-        - NEVER fabricate journal names, author names, or publication years
-        - If you cannot verify a source, do not include it
         
         BANNED PHRASES:
         - "consumed responsibly"
@@ -3757,39 +5305,49 @@ struct HealthDetailView: View {
         {
             "summary": "One paragraph (40-60 words) starting with the \(category.lowercased()) score (\(score)/100), naming specific compounds with numbers, acknowledging negatives",
             "researchEvidence": [
-                "[Finding]. ([Author] et al., [Year])",
-                "[Finding]. ([Author] et al., [Year])"
-            ],
-            "sources": [
-                "• [Journal Name] ([Year])",
-                "• [Author] et al., [Journal Name], [Year]"
+                {
+                    "ingredient": "Ingredient name",
+                    "nutrient": "Specific nutrient",
+                    "outcome": "Health outcome finding",
+                    "authors": "First Author et al.",
+                    "year": 2021,
+                    "journal": "Journal Name",
+                    "doi": "10.xxxx/xxxxx or null",
+                    "pmid": "12345678 or null",
+                    "title": "Study title or null",
+                    "url": "https://doi.org/10.xxxx/xxxxx or https://pubmed.ncbi.nlm.nih.gov/12345678/ or null"
+                }
             ]
         }
+        
+        REQUIREMENTS:
+        - At least ONE of doi or pmid must be provided (not both null)
+        - DOI format: 10.xxxx/xxxxx
+        - PMID format: numeric, 6-8 digits
+        - If no verified studies exist, return empty researchEvidence array []
         """
         
         Task {
             do {
                 let text = try await AIService.shared.makeOpenAIRequestAsync(prompt: prompt)
                 
+                // Process through ResearchEvidenceService for verification
+                let verifiedCitations = await ResearchEvidenceService.shared.processAIResponse(text)
+                
                 await MainActor.run {
                     isLoading = false
                     
-                    // Try to extract JSON from the response text
-                    let jsonText = self.extractJSONFromText(text)
-                    print("🔍 Extracted JSON: \(jsonText.prefix(200))...")
+                    // Extract summary from response
+                    let summary = extractSummary(from: text) ?? self.getCategorySpecificFallbackSummary()
                     
-                    if let infoData = jsonText.data(using: .utf8) {
-                        do {
-                            let info = try JSONDecoder().decode(HealthInfo.self, from: infoData)
-                            print("✅ Successfully decoded HealthInfo")
-                            self.healthInfo = info
-                        } catch {
-                            print("❌ Failed to decode HealthInfo: \(error)")
-                            self.createFallbackHealthInfo()
-                        }
+                    // Convert verified citations to legacy format
+                    if !verifiedCitations.isEmpty {
+                        self.healthInfo = HealthInfo(summary: summary, verifiedCitations: verifiedCitations)
+                        print("✅ Successfully processed \(verifiedCitations.count) verified citations")
                     } else {
-                        print("❌ Failed to convert extracted JSON to data")
-                        self.createFallbackHealthInfo()
+                        // No verified citations - return empty structure
+                        self.healthInfo = HealthInfo(summary: summary, verifiedCitations: [])
+                        print("⚠️ No verified citations found - returning empty research evidence")
                     }
                 }
             } catch {
@@ -3827,17 +5385,43 @@ struct HealthDetailView: View {
     private func createFallbackHealthInfo() {
         let categorySpecificSummary = getCategorySpecificFallbackSummary()
         
+        // Return empty citations - no fake citations allowed
         self.healthInfo = HealthInfo(
             summary: categorySpecificSummary,
-            researchEvidence: [
-                "Research supports the health benefits of nutrient-dense foods for \(category.lowercased())",
-                "Longevity-focused nutrition emphasizes whole food consumption patterns"
-            ],
-            sources: [
-                "Nutritional research database",
-                "Longevity health studies"
-            ]
+            verifiedCitations: []
         )
+    }
+    
+    /// Extracts summary from AI response JSON
+    private func extractSummary(from text: String) -> String? {
+        // Extract JSON from text
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```") {
+            let lines = cleaned.components(separatedBy: .newlines)
+            var jsonLines = lines
+            if let firstLine = jsonLines.first, firstLine.contains("json") {
+                jsonLines.removeFirst()
+            } else if let firstLine = jsonLines.first, firstLine.hasPrefix("```") {
+                jsonLines.removeFirst()
+            }
+            if let lastLine = jsonLines.last, lastLine == "```" {
+                jsonLines.removeLast()
+            }
+            cleaned = jsonLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        if let startIndex = cleaned.firstIndex(of: "{"),
+           let endIndex = cleaned.lastIndex(of: "}") {
+            let jsonRange = startIndex...endIndex
+            cleaned = String(cleaned[jsonRange])
+        }
+        
+        guard let data = cleaned.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summary = json["summary"] as? String else {
+            return nil
+        }
+        return summary
     }
     
     private func getCategorySpecificFallbackSummary() -> String {
@@ -3845,29 +5429,29 @@ struct HealthDetailView: View {
         
         switch category.lowercased() {
         case "heart":
-            return "This food shows \(scoreDescription) heart health benefits with a longevity score of \(longevityScore)/100. Heart-healthy foods typically contain antioxidants, healthy fats, and nutrients that support cardiovascular function and reduce inflammation."
+            return "This food contains nutrients commonly studied in relation to heart health, with a longevity score of \(longevityScore)/100. Foods researched for heart health typically contain antioxidants, healthy fats, and nutrients that are part of dietary patterns associated with cardiovascular function."
         case "brain":
-            return "This food demonstrates \(scoreDescription) brain health benefits with a longevity score of \(longevityScore)/100. Brain-supporting foods often contain omega-3 fatty acids, antioxidants, and nutrients that enhance cognitive function and protect against age-related decline."
+            return "This food contains nutrients commonly studied in relation to brain health, with a longevity score of \(longevityScore)/100. Foods researched for brain health often contain omega-3 fatty acids, antioxidants, and nutrients that are part of dietary patterns associated with cognitive function."
         case "anti-inflam", "anti-inflammation":
-            return "This food provides \(scoreDescription) anti-inflammatory benefits with a longevity score of \(longevityScore)/100. Anti-inflammatory foods typically contain compounds that help reduce chronic inflammation, which is linked to many age-related diseases."
+            return "This food contains nutrients commonly studied in relation to inflammation, with a longevity score of \(longevityScore)/100. Foods researched for inflammation typically contain compounds that are part of dietary patterns associated with normal inflammatory function."
         case "bones", "joints", "bones & joints":
-            return "This food offers \(scoreDescription) bone and joint health benefits with a longevity score of \(longevityScore)/100. Bone-supporting foods typically contain calcium, vitamin D, magnesium, and other nutrients essential for maintaining bone density and joint health."
+            return "This food contains nutrients commonly studied in relation to bone and joint health, with a longevity score of \(longevityScore)/100. Foods researched for bone health typically contain calcium, vitamin D, magnesium, and other nutrients that are part of dietary patterns associated with bone function."
         case "weight", "weight management":
-            return "This food supports \(scoreDescription) weight management with a longevity score of \(longevityScore)/100. Weight-friendly foods typically provide satiety, stable blood sugar, and metabolic support while being nutrient-dense and low in empty calories."
+            return "This food contains nutrients commonly studied in relation to weight management, with a longevity score of \(longevityScore)/100. Foods researched for weight management typically provide satiety-supporting nutrients and are part of dietary patterns associated with metabolic function."
         case "blood sugar":
-            return "This food shows \(scoreDescription) blood sugar regulation benefits with a longevity score of \(longevityScore)/100. Blood sugar-friendly foods typically have a low glycemic index and contain fiber, protein, and healthy fats that help maintain stable glucose levels."
+            return "This food contains nutrients commonly studied in relation to blood sugar, with a longevity score of \(longevityScore)/100. Foods researched for blood sugar typically have a low glycemic index and contain fiber, protein, and healthy fats that are part of dietary patterns associated with glucose metabolism."
         case "energy":
-            return "This food provides \(scoreDescription) energy support with a longevity score of \(longevityScore)/100. Energy-boosting foods typically contain B vitamins, iron, complex carbohydrates, and other nutrients that support cellular energy production and reduce fatigue."
+            return "This food contains nutrients commonly studied in relation to energy, with a longevity score of \(longevityScore)/100. Foods researched for energy typically contain B vitamins, iron, complex carbohydrates, and other nutrients that are part of dietary patterns associated with energy metabolism."
         case "immune":
-            return "This food offers \(scoreDescription) immune system support with a longevity score of \(longevityScore)/100. Immune-supporting foods typically contain vitamin C, zinc, antioxidants, and other nutrients that help strengthen the body's natural defense mechanisms."
+            return "This food contains nutrients commonly studied in relation to immune function, with a longevity score of \(longevityScore)/100. Foods researched for immune health typically contain vitamin C, zinc, antioxidants, and other nutrients that are part of dietary patterns associated with immune function."
         case "sleep":
-            return "This food supports \(scoreDescription) sleep quality with a longevity score of \(longevityScore)/100. Sleep-promoting foods typically contain magnesium, tryptophan, melatonin precursors, and other nutrients that help regulate sleep-wake cycles."
+            return "This food contains nutrients commonly studied in relation to sleep, with a longevity score of \(longevityScore)/100. Foods researched for sleep typically contain magnesium, tryptophan, melatonin precursors, and other nutrients that are part of dietary patterns associated with sleep function."
         case "skin":
-            return "This food provides \(scoreDescription) skin health benefits with a longevity score of \(longevityScore)/100. Skin-supporting foods typically contain antioxidants, healthy fats, and nutrients that promote collagen production and protect against oxidative damage."
+            return "This food contains nutrients commonly studied in relation to skin health, with a longevity score of \(longevityScore)/100. Foods researched for skin health typically contain antioxidants, healthy fats, and nutrients that are part of dietary patterns associated with skin function."
         case "stress":
-            return "This food offers \(scoreDescription) stress management support with a longevity score of \(longevityScore)/100. Stress-reducing foods typically contain adaptogens, B vitamins, magnesium, and other nutrients that help the body cope with stress and maintain balance."
+            return "This food contains nutrients commonly studied in relation to stress, with a longevity score of \(longevityScore)/100. Foods researched for stress typically contain adaptogens, B vitamins, magnesium, and other nutrients that are part of dietary patterns associated with stress function."
         default:
-            return "This food shows \(scoreDescription) \(category.lowercased()) benefits with a longevity score of \(longevityScore)/100. While specific research details are temporarily unavailable, the overall nutritional profile suggests positive health impacts for this category."
+            return "This food contains nutrients commonly studied in relation to \(category.lowercased()), with a longevity score of \(longevityScore)/100. While specific research details are temporarily unavailable, the overall nutritional profile contains nutrients that are part of dietary patterns researched for this category."
         }
     }
     
@@ -3925,169 +5509,166 @@ struct HealthDetailView: View {
         return ingredients.first?.name
     }
     
+    // CRITICAL: Use educational language only - no medical claims, no treatment/prevention language
     private func getCategorySpecificPrompt(category: String, foodName: String) -> String {
         switch category {
         case "Heart":
             return """
-            Analyze how \(foodName) specifically benefits heart health. Focus on:
-            - Effects on blood pressure, cholesterol levels, and cardiovascular function
-            - Specific compounds that protect heart muscle and blood vessels
-            - Research on heart disease prevention and cardiovascular outcomes
-            - Impact on heart rhythm, arterial health, and cardiac performance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to heart health. Focus on:
+            - Nutrients present that are researched for cardiovascular function
+            - Dietary patterns associated with heart health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to heart function
             """
             
         case "Brain":
             return """
-            Analyze how \(foodName) specifically benefits brain health and cognitive function. Focus on:
-            - Effects on memory, focus, and cognitive performance
-            - Neuroprotective compounds and brain cell health
-            - Research on neurodegenerative disease prevention
-            - Impact on mood, mental clarity, and brain energy metabolism
+            Analyze nutrients in \(foodName) that are commonly studied in relation to brain health. Focus on:
+            - Nutrients present that are researched for cognitive function
+            - Dietary patterns associated with brain health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to brain function
             """
             
         case "Anti-Inflam":
             return """
-            Analyze how \(foodName) specifically reduces inflammation throughout the body. Focus on:
-            - Anti-inflammatory compounds and their mechanisms
-            - Effects on inflammatory markers and cytokines
-            - Research on chronic inflammation reduction
-            - Impact on inflammatory conditions and pain relief
+            Analyze nutrients in \(foodName) that are commonly studied in relation to inflammation. Focus on:
+            - Nutrients and compounds present in the food
+            - Research associations with inflammatory markers
+            - Dietary patterns researched for inflammation
+            - Educational context about nutrient presence (do NOT describe mechanisms as outcomes)
             """
             
         case "Joints":
             return """
-            Analyze how \(foodName) specifically benefits joint health and mobility. Focus on:
-            - Effects on cartilage health and joint lubrication
-            - Anti-inflammatory benefits for joints
-            - Research on arthritis prevention and management
-            - Impact on joint flexibility, pain reduction, and mobility
+            Analyze nutrients in \(foodName) that are commonly studied in relation to joint health. Focus on:
+            - Nutrients present that are researched for joint function
+            - Dietary patterns associated with joint health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to joint function
             """
             
         case "Eyes", "Vision":
             return """
-            Analyze how \(foodName) specifically benefits eye health and vision. Focus on:
-            - Effects on retinal health and visual acuity
-            - Protective compounds for eye tissues
-            - Research on age-related eye disease prevention
-            - Impact on vision clarity, eye strain, and ocular health
+            Analyze nutrients in \(foodName) that are commonly studied in relation to eye health. Focus on:
+            - Nutrients present that are researched for vision function
+            - Dietary patterns associated with eye health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to vision
             """
             
         case "Weight":
             return """
-            Analyze how \(foodName) specifically supports weight management and metabolism. Focus on:
-            - Effects on appetite regulation and satiety
-            - Impact on metabolic rate and fat burning
-            - Research on weight loss and maintenance
-            - Effects on body composition and energy balance
+            Analyze nutrients in \(foodName) that are commonly studied in relation to weight management. Focus on:
+            - Nutrients present that are researched for satiety and metabolism
+            - Dietary patterns associated with weight management
+            - Research context about nutrient presence (do NOT describe weight loss outcomes)
+            - Educational information about nutrients linked to satiety
             """
             
         case "Blood Sugar":
             return """
-            Analyze how \(foodName) specifically affects blood sugar regulation and diabetes prevention. Focus on:
-            - Effects on insulin sensitivity and glucose metabolism
-            - Impact on blood sugar spikes and glycemic control
-            - Research on diabetes prevention and management
-            - Effects on pancreatic function and glucose absorption
+            Analyze nutrients in \(foodName) that are commonly studied in relation to blood sugar. Focus on:
+            - Nutrients present that are researched for glucose metabolism
+            - Dietary patterns associated with blood sugar regulation
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to blood sugar function
             """
             
         case "Energy":
             return """
-            Analyze how \(foodName) specifically boosts energy levels and vitality. Focus on:
-            - Effects on cellular energy production and metabolism
-            - Impact on physical and mental stamina
-            - Research on fatigue reduction and endurance
-            - Effects on mitochondrial function and ATP production
+            Analyze nutrients in \(foodName) that are commonly studied in relation to energy. Focus on:
+            - Nutrients present that are researched for energy metabolism
+            - Dietary patterns associated with energy function
+            - Research context about nutrient presence (do NOT describe mechanisms as outcomes)
+            - Educational information about nutrients linked to energy
             """
             
         case "Immune":
             return """
-            Analyze how \(foodName) specifically strengthens the immune system. Focus on:
-            - Effects on immune cell function and production
-            - Impact on infection resistance and recovery
-            - Research on immune system enhancement
-            - Effects on inflammatory response and immune regulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to immune function. Focus on:
+            - Nutrients present that are researched for immune health
+            - Dietary patterns associated with immune function
+            - Research context about nutrient presence (do NOT describe enhancement or treatment)
+            - Educational information about nutrients linked to immune function
             """
             
         case "Sleep":
             return """
-            Analyze how \(foodName) specifically improves sleep quality and regulation. Focus on:
-            - Effects on sleep hormones and circadian rhythm
-            - Impact on sleep onset and duration
-            - Research on sleep quality improvement
-            - Effects on relaxation and stress reduction for better sleep
+            Analyze nutrients in \(foodName) that are commonly studied in relation to sleep. Focus on:
+            - Nutrients present that are researched for sleep function
+            - Dietary patterns associated with sleep
+            - Research context about nutrient presence (do NOT describe improvement or treatment)
+            - Educational information about nutrients linked to sleep
             """
             
         case "Skin":
             return """
-            Analyze how \(foodName) specifically benefits skin health and appearance. Focus on:
-            - Effects on collagen production and skin elasticity
-            - Impact on skin hydration and texture
-            - Research on anti-aging and skin protection
-            - Effects on skin repair and damage prevention
+            Analyze nutrients in \(foodName) that are commonly studied in relation to skin health. Focus on:
+            - Nutrients present that are researched for skin function
+            - Dietary patterns associated with skin health
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to skin function
             """
             
         case "Stress":
             return """
-            Analyze how \(foodName) specifically helps manage stress and promotes relaxation. Focus on:
-            - Effects on stress hormones and nervous system
-            - Impact on anxiety reduction and mood stabilization
-            - Research on stress management and mental health
-            - Effects on cortisol levels and stress response
+            Analyze nutrients in \(foodName) that are commonly studied in relation to stress. Focus on:
+            - Nutrients present that are researched for stress response
+            - Dietary patterns associated with stress management
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to stress function
             """
             
         case "Kidneys":
             return """
-            Analyze how \(foodName) specifically benefits kidney health and function. Focus on:
-            - Effects on kidney filtration and waste removal
-            - Impact on blood pressure and fluid balance
-            - Research on kidney disease prevention
-            - Effects on kidney function and protection
+            Analyze nutrients in \(foodName) that are commonly studied in relation to kidney health. Focus on:
+            - Nutrients present that are researched for kidney function
+            - Dietary patterns associated with kidney health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to kidney function
             """
             
         case "Detox/Liver":
             return """
-            Analyze how \(foodName) specifically supports liver health and detoxification. Focus on:
-            - Effects on liver enzyme function and detox pathways
-            - Impact on toxin processing and elimination
-            - Research on liver disease prevention
-            - Effects on liver health and regeneration
+            Analyze nutrients in \(foodName) that are commonly studied in relation to liver health. Focus on:
+            - Nutrients present that are researched for liver function
+            - Dietary patterns associated with liver health
+            - Research context about nutrient presence (do NOT describe prevention or treatment)
+            - Educational information about nutrients linked to liver function
             """
             
         case "Mood":
             return """
-            Analyze how \(foodName) specifically benefits mood and mental well-being. Focus on:
-            - Effects on neurotransmitters and brain chemistry
-            - Impact on depression and anxiety
-            - Research on mood regulation and mental health
-            - Effects on emotional balance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to mood. Focus on:
+            - Nutrients present that are researched for mood function
+            - Dietary patterns associated with mood
+            - Research context about nutrient presence (do NOT describe treatment or management)
+            - Educational information about nutrients linked to mood
             """
             
         case "Allergies":
             return """
-            Analyze how \(foodName) specifically affects allergy symptoms and immune response. Focus on:
-            - Effects on histamine response and inflammation
-            - Impact on allergic reactions and symptoms
-            - Research on allergy management and prevention
-            - Effects on immune system modulation
+            Analyze nutrients in \(foodName) that are commonly studied in relation to allergies. Focus on:
+            - Nutrients present that are researched for immune response
+            - Dietary patterns associated with allergy response
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to immune function
             """
             
         default:
             return """
-            Analyze how \(foodName) specifically affects \(category.lowercased()) health. Focus on:
-            - Direct effects on \(category.lowercased()) function and health
-            - Specific compounds that benefit \(category.lowercased()) health
-            - Research on \(category.lowercased()) health outcomes
-            - Impact on \(category.lowercased()) performance and well-being
+            Analyze nutrients in \(foodName) that are commonly studied in relation to \(category.lowercased()). Focus on:
+            - Nutrients present that are researched for \(category.lowercased()) function
+            - Dietary patterns associated with \(category.lowercased())
+            - Research context about nutrient presence (do NOT describe treatment or prevention)
+            - Educational information about nutrients linked to \(category.lowercased())
             """
         }
     }
 }
 
-struct HealthInfo: Codable {
-    let summary: String
-    let researchEvidence: [String]
-    let sources: [String]
-}
+// HealthInfo moved to ResearchCitation.swift
 
 struct AddToMealTrackerSheet: View {
     let analysis: FoodAnalysis
@@ -4393,6 +5974,157 @@ struct AddToMealTrackerSheet: View {
     }
 }
 
+// MARK: - Secondary Details Response (Outside ResultsView)
+
+struct SecondaryDetailsResponse: Codable {
+    let keyBenefits: [String]
+    let ingredientAnalyses: [IngredientAnalysis]
+    let drugInteractions: [DrugInteraction]
+    let dosageAnalyses: [DosageAnalysis]
+    let safetyWarnings: [SafetyWarning]
+    let qualityIndicators: [QualityIndicator]
+}
+
+// MARK: - Row Components (Outside ResultsView)
+
+struct DosageAnalysisRow: View {
+    let dosage: DosageAnalysis
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(dosage.ingredient)
+                .font(.subheadline)
+                .fontWeight(.medium)
+            
+            HStack {
+                Text("Label: \(dosage.labelDose)")
+                    .font(.caption)
+                Spacer()
+                Text("Clinical: \(dosage.clinicalRange)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 8)
+                        .cornerRadius(4)
+                    
+                    Rectangle()
+                        .fill(dosageColor)
+                        .frame(width: geo.size.width * dosagePercentage, height: 8)
+                        .cornerRadius(4)
+                }
+            }
+            .frame(height: 8)
+            
+            HStack {
+                Image(systemName: dosage.verdict == "optimal" ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(dosage.verdict == "optimal" ? .green : .orange)
+                Text(verdictText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+    
+    var dosagePercentage: CGFloat {
+        switch dosage.verdict {
+        case "optimal": return 0.8
+        case "high": return 1.0
+        default: return 0.3
+        }
+    }
+    
+    var dosageColor: Color {
+        switch dosage.verdict {
+        case "optimal": return .green
+        case "high": return .orange
+        default: return .yellow
+        }
+    }
+    
+    var verdictText: String {
+        switch dosage.verdict {
+        case "optimal": return "Optimal — Within effective range"
+        case "high": return "High — Above typical clinical range"
+        default: return "Below optimal — Consider higher dose"
+        }
+    }
+}
+
+struct SafetyWarningRow: View {
+    let warning: SafetyWarning
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: warning.category == "sideEffect" ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundColor(warning.category == "sideEffect" ? .blue : .orange)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(warning.category.capitalized)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                Text(warning.warning)
+                    .font(.subheadline)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+}
+
+struct QualityIndicatorRow: View {
+    let indicator: QualityIndicator
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: statusIcon)
+                .foregroundColor(statusColor)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(indicator.indicator)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                if let detail = indicator.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
+    
+    var statusIcon: String {
+        switch indicator.status {
+        case "positive": return "checkmark.circle.fill"
+        case "negative": return "exclamationmark.triangle.fill"
+        default: return "info.circle.fill"
+        }
+    }
+    
+    var statusColor: Color {
+        switch indicator.status {
+        case "positive": return .green
+        case "negative": return .orange
+        default: return .blue
+        }
+    }
+}
+
+// Preview removed due to complex initialization requirements
+/*
 #Preview {
     ResultsView(
         analysis: FoodAnalysis(
@@ -4417,7 +6149,7 @@ struct AddToMealTrackerSheet: View {
                 stress: 85,
                 weightManagement: 85
             ),
-            keyBenefits: ["High in antioxidants", "Supports heart health", "Boosts energy"],
+            keyBenefits: ["High in antioxidants", "Contains nutrients linked to heart health", "Contains nutrients linked to energy"],
             ingredients: [
                 FoodIngredient(name: "Sample Ingredient", impact: "Positive", explanation: "Good for health")
             ],
@@ -4439,3 +6171,4 @@ struct AddToMealTrackerSheet: View {
         onNewSearch: {}
     )
 }
+*/

@@ -12,14 +12,22 @@ import CoreImage
 import CoreGraphics
 import Vision
 
+enum ScannerMode {
+    case groceries    // Keep barcode detection
+    case supplements  // Skip barcode detection
+}
+
 struct ScannerViewController: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
+    let mode: ScannerMode
     let onBarcodeCaptured: (UIImage, String?) -> Void
     let onFrontLabelCaptured: (UIImage) -> Void
+    var onSupplementScanComplete: ((UIImage, UIImage) -> Void)? = nil
     
     func makeUIViewController(context: Context) -> ScannerVC {
         let controller = ScannerVC()
         controller.delegate = context.coordinator
+        controller.scannerMode = mode
         return controller
     }
     
@@ -49,6 +57,10 @@ struct ScannerViewController: UIViewControllerRepresentable {
         func didCancel() {
             parent.isPresented = false
         }
+        
+        func didCompleteSupplementScan(frontImage: UIImage, factsImage: UIImage) {
+            parent.onSupplementScanComplete?(frontImage, factsImage)
+        }
     }
 }
 
@@ -56,6 +68,7 @@ protocol ScannerVCDelegate: AnyObject {
     func didCaptureBarcodeImage(_ image: UIImage, barcode: String?)
     func didCaptureFrontLabelImage(_ image: UIImage)
     func didCancel()
+    func didCompleteSupplementScan(frontImage: UIImage, factsImage: UIImage)
 }
 
 enum ScannerState {
@@ -64,8 +77,15 @@ enum ScannerState {
     case capturingFrontLabel
 }
 
+enum SupplementCapturePhase {
+    case frontLabel         // First: product name image
+    case supplementFacts    // Second: ingredients image
+}
+
 class ScannerVC: UIViewController {
     weak var delegate: ScannerVCDelegate?
+    
+    var scannerMode: ScannerMode = .groceries  // Default to groceries for backward compatibility
     
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
@@ -76,15 +96,36 @@ class ScannerVC: UIViewController {
     private var buttonContainer: UIView?
     private var scanningOverlay: UIView?
     private var promptLabel: UILabel?
+    private var subtextLabel: UILabel?
     
     private var currentState: ScannerState = .scanningBarcode
     private var detectedBarcode: String?
     private var barcodeImage: UIImage?
     
+    // For supplements two-capture flow
+    private var supplementPhase: SupplementCapturePhase = .frontLabel
+    private var frontLabelImage: UIImage?
+    private var supplementFactsImage: UIImage?
+    
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        // Set initial state based on mode
+        if scannerMode == .supplements {
+            currentState = .capturingFrontLabel  // Skip barcode phase for supplements
+            supplementPhase = .frontLabel  // Start with front label capture
+        }
+        
         setupCamera()
         setupUI()
+        
+        // Update UI based on mode
+        if scannerMode == .supplements {
+            updateSupplementUI()
+        } else if scannerMode == .groceries {
+            // Initialize grocery UI - show barcode instruction banner
+            transitionToState(.scanningBarcode)
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -131,16 +172,21 @@ class ScannerVC: UIViewController {
             return
         }
         
-        // Setup metadata output for continuous barcode detection
-        let metadataOutput = AVCaptureMetadataOutput()
-        if session.canAddOutput(metadataOutput) {
-            session.addOutput(metadataOutput)
-            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-            metadataOutput.metadataObjectTypes = [.ean13, .ean8, .upce, .code128, .code39, .code93]
-            self.metadataOutput = metadataOutput
+        // Setup metadata output for continuous barcode detection (only for groceries mode)
+        if scannerMode == .groceries {
+            let metadataOutput = AVCaptureMetadataOutput()
+            if session.canAddOutput(metadataOutput) {
+                session.addOutput(metadataOutput)
+                metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+                metadataOutput.metadataObjectTypes = [.ean13, .ean8, .upce, .code128, .code39, .code93]
+                self.metadataOutput = metadataOutput
+            } else {
+                print("Scanner: Cannot add metadata output")
+                return
+            }
         } else {
-            print("Scanner: Cannot add metadata output")
-            return
+            // Supplements mode: skip barcode detection
+            self.metadataOutput = nil
         }
         
         captureSession = session
@@ -156,8 +202,9 @@ class ScannerVC: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        // Set metadata output rect of interest after preview layer is set up
-        if let metadataOutput = self.metadataOutput,
+        // Set metadata output rect of interest after preview layer is set up (only for groceries)
+        if scannerMode == .groceries,
+           let metadataOutput = self.metadataOutput,
            let previewLayer = self.previewLayer {
             // Set rect of interest to full screen (normalized coordinates)
             metadataOutput.rectOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -179,7 +226,7 @@ class ScannerVC: UIViewController {
         view.addSubview(container)
         self.buttonContainer = container
         
-        // Capture button - initially hidden, shown when front label capture is needed
+        // Capture button - initially hidden for groceries, shown immediately for supplements
         let captureButton = UIButton(type: .system)
         captureButton.setTitle("Capture Label", for: .normal)
         captureButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -187,7 +234,8 @@ class ScannerVC: UIViewController {
         captureButton.layer.cornerRadius = 12
         captureButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         captureButton.addTarget(self, action: #selector(captureTapped), for: .touchUpInside)
-        captureButton.isHidden = true // Hidden initially, shown when barcode is detected
+        // Show immediately for supplements mode, hidden for groceries (shown after barcode detected)
+        captureButton.isHidden = (scannerMode == .groceries)
         container.addSubview(captureButton)
         self.captureButton = captureButton
         
@@ -212,16 +260,32 @@ class ScannerVC: UIViewController {
         // Prompt label for front label capture - moved to top
         let promptLabel = UILabel()
         promptLabel.text = "Take A Photo Of The Front Label For Reference"
-        promptLabel.font = .systemFont(ofSize: 17, weight: .medium)
+        promptLabel.font = .systemFont(ofSize: 19, weight: .semibold)
         promptLabel.textColor = .white
         promptLabel.textAlignment = .center
         promptLabel.numberOfLines = 0
-        promptLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        // Background will be set by gradient, start with clear
+        promptLabel.backgroundColor = .clear
         promptLabel.layer.cornerRadius = 12
-        promptLabel.isHidden = true
+        // Show immediately for supplements mode, hidden for groceries (shown after barcode detected)
+        promptLabel.isHidden = (scannerMode == .groceries)
+        promptLabel.clipsToBounds = true
         promptLabel.layer.masksToBounds = true
         view.addSubview(promptLabel)
         self.promptLabel = promptLabel
+        
+        // Subtext label for supplements two-phase guidance
+        let subtextLabel = UILabel()
+        subtextLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        subtextLabel.textColor = .white
+        subtextLabel.textAlignment = .center
+        subtextLabel.numberOfLines = 0
+        subtextLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        subtextLabel.layer.cornerRadius = 8
+        subtextLabel.isHidden = (scannerMode == .groceries)
+        subtextLabel.layer.masksToBounds = true
+        view.addSubview(subtextLabel)
+        self.subtextLabel = subtextLabel
         
         // Ensure button container is on top
         view.bringSubviewToFront(container)
@@ -310,7 +374,8 @@ class ScannerVC: UIViewController {
         // Update prompt label position - moved to top
         if let promptLabel = promptLabel {
             let promptWidth = view.bounds.width - 40
-            let promptHeight: CGFloat = 50
+            // Height: 80 for supplements (multi-line), 60 for groceries (single-line)
+            let promptHeight: CGFloat = (scannerMode == .supplements) ? 80 : 60
             let topPadding: CGFloat = 60 // Safe area + padding
             promptLabel.frame = CGRect(
                 x: 20,
@@ -318,7 +383,74 @@ class ScannerVC: UIViewController {
                 width: promptWidth,
                 height: promptHeight
             )
+            // Ensure center alignment
+            promptLabel.textAlignment = .center
+            promptLabel.numberOfLines = 0 // Allow multiple lines
             promptLabel.layer.masksToBounds = true
+            
+            // Apply gradient after frame is set (for supplements and groceries)
+            // This ensures label.bounds is correct when gradient is created
+            if scannerMode == .supplements {
+                // Ensure text is white and visible before applying gradient
+                promptLabel.textColor = .white
+                promptLabel.backgroundColor = .clear
+                
+                // Always remove existing gradient view and recreate with correct colors for current phase
+                if let gradientView = promptLabel.superview?.subviews.first(where: { $0.tag == 9999 }) {
+                    gradientView.removeFromSuperview()
+                }
+                
+                // Create gradient with correct colors for current phase
+                if supplementPhase == .frontLabel {
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                        UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                    ])
+                } else if supplementPhase == .supplementFacts {
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                        UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                    ])
+                }
+            } else if scannerMode == .groceries {
+                // For groceries: Apply gradient based on current state (apply even if label is hidden initially)
+                promptLabel.textColor = .white
+                promptLabel.backgroundColor = .clear
+                
+                // Always remove existing gradient view and recreate with correct colors for current state
+                if let gradientView = promptLabel.superview?.subviews.first(where: { $0.tag == 9999 }) {
+                    gradientView.removeFromSuperview()
+                }
+                
+                // Create gradient with correct colors for current state
+                if currentState == .scanningBarcode {
+                    // Orange/red gradient for barcode scanning
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                        UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                    ])
+                } else if currentState == .capturingFrontLabel {
+                    // Blue/green gradient for label capture
+                    applyGradientToLabel(promptLabel, colors: [
+                        UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                        UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                    ])
+                }
+            }
+        }
+        
+        // Update subtext label position (below prompt label for supplements)
+        if let subtextLabel = subtextLabel, scannerMode == .supplements {
+            let promptBottom = (promptLabel?.frame.maxY ?? 0) + 8
+            let subtextWidth = view.bounds.width - 40
+            let subtextHeight: CGFloat = 40
+            subtextLabel.frame = CGRect(
+                x: 20,
+                y: promptBottom,
+                width: subtextWidth,
+                height: subtextHeight
+            )
+            subtextLabel.layer.masksToBounds = true
         }
     }
     
@@ -357,6 +489,149 @@ class ScannerVC: UIViewController {
         
         // Set dark gray background color
         button.backgroundColor = UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+    }
+    
+    private func updateSupplementUI() {
+        guard scannerMode == .supplements else { return }
+        
+        // Hide subtext label for both phases
+        subtextLabel?.isHidden = true
+        
+        switch supplementPhase {
+        case .frontLabel:
+            // Set text first
+            promptLabel?.text = "Photograph the FRONT of the bottle"
+            promptLabel?.textColor = .white
+            promptLabel?.font = .systemFont(ofSize: 19, weight: .semibold)
+            promptLabel?.textAlignment = .center
+            promptLabel?.numberOfLines = 0
+            captureButton?.setTitle("Capture Front", for: .normal)
+            // Apply red/orange gradient immediately
+            if let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                    UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                ])
+            }
+            
+        case .supplementFacts:
+            // Add line spacing for multi-line text with white color and center alignment
+            let attributedText = NSMutableAttributedString(string: "Now photograph the\nSUPPLEMENT FACTS panel")
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineSpacing = 8
+            paragraphStyle.alignment = .center // Center align the text
+            attributedText.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: attributedText.length))
+            // Ensure white text color with semibold font
+            attributedText.addAttribute(.foregroundColor, value: UIColor.white, range: NSRange(location: 0, length: attributedText.length))
+            attributedText.addAttribute(.font, value: UIFont.systemFont(ofSize: 17, weight: .semibold), range: NSRange(location: 0, length: attributedText.length))
+            promptLabel?.attributedText = attributedText
+            promptLabel?.textColor = .white
+            promptLabel?.textAlignment = .center
+            promptLabel?.numberOfLines = 0
+            captureButton?.setTitle("Capture Supplement Facts", for: .normal)
+            // Apply blue/green gradient immediately
+            if let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                    UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                ])
+            }
+        }
+    }
+    
+    private func applyGradientToLabel(_ label: UILabel?, colors: [CGColor]) {
+        guard let label = label else { return }
+        
+        // Debug: Check if text is set
+        print("🔍 Applying gradient to label with text: '\(label.text ?? "nil")'")
+        
+        // Ensure layout is complete before applying gradient
+        label.layoutIfNeeded()
+        
+        // Remove ALL existing gradient background views (not just first one)
+        label.superview?.subviews
+            .filter { $0.tag == 9999 }
+            .forEach { 
+                print("🔍 Removing existing gradient view")
+                $0.removeFromSuperview() 
+            }
+        
+        // Remove existing gradient layers from label itself
+        label.layer.sublayers?.forEach { layer in
+            if layer is CAGradientLayer {
+                layer.removeFromSuperlayer()
+            }
+        }
+        
+        // Create gradient background view BEHIND the label (not as sublayer of label)
+        let gradientView = UIView(frame: label.frame)
+        gradientView.tag = 9999 // Tag to identify and remove later
+        gradientView.layer.cornerRadius = 12
+        gradientView.clipsToBounds = true
+        gradientView.isUserInteractionEnabled = false // Don't block touches
+        
+        // Create gradient layer for the background view
+        let gradient = CAGradientLayer()
+        gradient.frame = gradientView.bounds
+        gradient.cornerRadius = 12
+        gradient.colors = colors
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        gradientView.layer.addSublayer(gradient)
+        
+        // Insert gradient view BEHIND the label in superview
+        if let superview = label.superview {
+            superview.insertSubview(gradientView, belowSubview: label)
+            print("🔍 Gradient view inserted behind label")
+        }
+        
+        // Ensure label has clear background so gradient shows through
+        label.backgroundColor = .clear
+        
+        // Ensure text color is white and visible - CRITICAL
+        label.textColor = .white
+        print("🔍 Label textColor set to white: \(label.textColor == .white)")
+        
+        // Ensure label doesn't clip text
+        label.clipsToBounds = false // Don't clip text
+        label.layer.masksToBounds = false // Allow text to render properly
+    }
+    
+    private func handleSupplementCapture(_ image: UIImage) {
+        switch supplementPhase {
+        case .frontLabel:
+            print("📸 SUPPLEMENT: Phase 1 - Front label captured")
+            frontLabelImage = image
+            supplementPhase = .supplementFacts
+            updateSupplementUI()
+            
+            // Apply blue/green gradient immediately after phase change
+            if supplementPhase == .supplementFacts, let promptLabel = promptLabel {
+                applyGradientToLabel(promptLabel, colors: [
+                    UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                    UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                ])
+            }
+            
+            // Update overlay for facts phase
+            updateScanningOverlay()
+            
+            // Force layout update to ensure gradient is visible
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            
+            // Stay in scanner for second capture
+            
+        case .supplementFacts:
+            print("📸 SUPPLEMENT: Phase 2 - Supplement Facts captured")
+            supplementFactsImage = image
+            // Both images captured — call completion
+            if let front = frontLabelImage, let facts = supplementFactsImage {
+                delegate?.didCompleteSupplementScan(frontImage: front, factsImage: facts)
+            }
+            // Dismiss scanner
+            stopSession()
+        }
     }
     
     private func updateScanningOverlay() {
@@ -424,53 +699,108 @@ class ScannerVC: UIViewController {
             
             overlay.layer.addSublayer(scanningLine)
         } else if currentState == .capturingFrontLabel {
-            // Draw corner frame markers for front label capture
-            let bracketLength: CGFloat = 40
-            let bracketWidth: CGFloat = 4
-            let margin: CGFloat = 40
-            
-            // Center the frame in the view
-            let frameWidth = view.bounds.width - (margin * 2)
-            let frameHeight = frameWidth * 0.75 // 4:3 aspect ratio
-            let frameX = margin
-            let frameY = (view.bounds.height - frameHeight) / 2
-            
-            let frameRect = CGRect(
-                x: frameX,
-                y: frameY,
-                width: frameWidth,
-                height: frameHeight
-            )
-            
-            let path = UIBezierPath()
-            
-            // Top-left corner
-            path.move(to: CGPoint(x: frameRect.minX, y: frameRect.minY + bracketLength))
-            path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.minY))
-            path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.minY))
-            
-            // Top-right corner
-            path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.minY))
-            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY))
-            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY + bracketLength))
-            
-            // Bottom-left corner
-            path.move(to: CGPoint(x: frameRect.minX, y: frameRect.maxY - bracketLength))
-            path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.maxY))
-            path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.maxY))
-            
-            // Bottom-right corner
-            path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.maxY))
-            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY))
-            path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY - bracketLength))
-            
-            let shapeLayer = CAShapeLayer()
-            shapeLayer.path = path.cgPath
-            shapeLayer.strokeColor = UIColor.white.cgColor
-            shapeLayer.lineWidth = bracketWidth
-            shapeLayer.fillColor = UIColor.clear.cgColor
-            overlay.layer.addSublayer(shapeLayer)
+            // Draw vertical rectangle frame markers for supplement capture
+            drawSupplementFrame(overlay: overlay, isFactsPhase: false)
+        } else if scannerMode == .supplements && supplementPhase == .supplementFacts {
+            // Draw vertical rectangle frame markers for supplement facts capture
+            drawSupplementFrame(overlay: overlay, isFactsPhase: true)
         }
+    }
+    
+    private func drawSupplementFrame(overlay: UIView, isFactsPhase: Bool) {
+        let bracketLength: CGFloat = 40
+        let bracketWidth: CGFloat = 2  // Thinner lines
+        let margin: CGFloat = 40
+        
+        // Vertical rectangle (portrait orientation) - taller than wide
+        let frameWidth = view.bounds.width - (margin * 2)
+        let frameHeight = frameWidth * 1.4  // Vertical rectangle: height is 1.4x width
+        let frameX = margin
+        let frameY = (view.bounds.height - frameHeight) / 2
+        
+        let frameRect = CGRect(
+            x: frameX,
+            y: frameY,
+            width: frameWidth,
+            height: frameHeight
+        )
+        
+        let path = UIBezierPath()
+        
+        // Top-left corner
+        path.move(to: CGPoint(x: frameRect.minX, y: frameRect.minY + bracketLength))
+        path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.minY))
+        path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.minY))
+        
+        // Top-right corner
+        path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.minY))
+        path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY))
+        path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.minY + bracketLength))
+        
+        // Bottom-left corner
+        path.move(to: CGPoint(x: frameRect.minX, y: frameRect.maxY - bracketLength))
+        path.addLine(to: CGPoint(x: frameRect.minX, y: frameRect.maxY))
+        path.addLine(to: CGPoint(x: frameRect.minX + bracketLength, y: frameRect.maxY))
+        
+        // Bottom-right corner
+        path.move(to: CGPoint(x: frameRect.maxX - bracketLength, y: frameRect.maxY))
+        path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY))
+        path.addLine(to: CGPoint(x: frameRect.maxX, y: frameRect.maxY - bracketLength))
+        
+        let shapeLayer = CAShapeLayer()
+        shapeLayer.path = path.cgPath
+        shapeLayer.strokeColor = UIColor.white.cgColor
+        shapeLayer.lineWidth = bracketWidth
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        overlay.layer.addSublayer(shapeLayer)
+        
+        // Draw camera bullseye in center
+        let centerX = frameRect.midX
+        let centerY = frameRect.midY
+        let bullseyeRadius: CGFloat = 20
+        
+        // Outer circle
+        let outerCirclePath = UIBezierPath(arcCenter: CGPoint(x: centerX, y: centerY),
+                                           radius: bullseyeRadius,
+                                           startAngle: 0,
+                                           endAngle: .pi * 2,
+                                           clockwise: true)
+        let outerCircleLayer = CAShapeLayer()
+        outerCircleLayer.path = outerCirclePath.cgPath
+        outerCircleLayer.strokeColor = UIColor.white.cgColor
+        outerCircleLayer.lineWidth = bracketWidth
+        outerCircleLayer.fillColor = UIColor.clear.cgColor
+        overlay.layer.addSublayer(outerCircleLayer)
+        
+        // Inner circle
+        let innerCirclePath = UIBezierPath(arcCenter: CGPoint(x: centerX, y: centerY),
+                                           radius: bullseyeRadius * 0.5,
+                                           startAngle: 0,
+                                           endAngle: .pi * 2,
+                                           clockwise: true)
+        let innerCircleLayer = CAShapeLayer()
+        innerCircleLayer.path = innerCirclePath.cgPath
+        innerCircleLayer.strokeColor = UIColor.white.cgColor
+        innerCircleLayer.lineWidth = bracketWidth
+        innerCircleLayer.fillColor = UIColor.clear.cgColor
+        overlay.layer.addSublayer(innerCircleLayer)
+        
+        // Crosshair lines
+        let crosshairLength: CGFloat = 15
+        let crosshairPath = UIBezierPath()
+        // Horizontal line
+        crosshairPath.move(to: CGPoint(x: centerX - crosshairLength, y: centerY))
+        crosshairPath.addLine(to: CGPoint(x: centerX + crosshairLength, y: centerY))
+        // Vertical line
+        crosshairPath.move(to: CGPoint(x: centerX, y: centerY - crosshairLength))
+        crosshairPath.addLine(to: CGPoint(x: centerX, y: centerY + crosshairLength))
+        
+        let crosshairLayer = CAShapeLayer()
+        crosshairLayer.path = crosshairPath.cgPath
+        crosshairLayer.strokeColor = UIColor.white.cgColor
+        crosshairLayer.lineWidth = bracketWidth
+        crosshairLayer.fillColor = UIColor.clear.cgColor
+        overlay.layer.addSublayer(crosshairLayer)
     }
     
     // MARK: - Actions
@@ -535,8 +865,33 @@ class ScannerVC: UIViewController {
             switch newState {
             case .scanningBarcode:
                 self.captureButton?.isHidden = true
-                self.promptLabel?.isHidden = true
                 self.cancelButton?.isHidden = false
+                
+                // For groceries: Show instruction banner with orange/red gradient
+                if self.scannerMode == .groceries {
+                    self.promptLabel?.isHidden = false
+                    self.promptLabel?.text = "Scan The Barcode"
+                    self.promptLabel?.textColor = .white
+                    self.promptLabel?.textAlignment = .center
+                    self.promptLabel?.numberOfLines = 0
+                    self.promptLabel?.backgroundColor = .clear
+                    
+                    // Apply orange/red gradient (same as supplement front label)
+                    if let promptLabel = self.promptLabel {
+                        self.applyGradientToLabel(promptLabel, colors: [
+                            UIColor(red: 0.7, green: 0.1, blue: 0.05, alpha: 1.0).cgColor,  // Darker red
+                            UIColor(red: 0.85, green: 0.35, blue: 0.0, alpha: 1.0).cgColor   // Darker orange
+                        ])
+                    }
+                } else {
+                    // Supplements: keep hidden
+                    self.promptLabel?.isHidden = true
+                }
+                
+                // Trigger layout update to ensure gradient is applied
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
+                
                 self.updateScanningOverlay()
                 
             case .barcodeDetected:
@@ -555,6 +910,25 @@ class ScannerVC: UIViewController {
                 self.promptLabel?.isHidden = false
                 self.cancelButton?.isHidden = false
                 self.cancelButton?.isEnabled = true
+                
+                // For groceries: Update instruction banner with blue/green gradient
+                if self.scannerMode == .groceries {
+                    self.promptLabel?.text = "Now Scan The Front Label"
+                    self.promptLabel?.textColor = .white
+                    self.promptLabel?.textAlignment = .center
+                    self.promptLabel?.numberOfLines = 0
+                    self.promptLabel?.backgroundColor = .clear
+                    
+                    // Apply blue/green gradient (same as supplement facts)
+                    if let promptLabel = self.promptLabel {
+                        self.applyGradientToLabel(promptLabel, colors: [
+                            UIColor(red: 0.1, green: 0.4, blue: 0.7, alpha: 1.0).cgColor,  // Blue
+                            UIColor(red: 0.1, green: 0.6, blue: 0.4, alpha: 1.0).cgColor   // Green
+                        ])
+                    }
+                }
+                // For supplements: text and gradient already set by updateSupplementUI()
+                
                 // Update layout to show stacked buttons
                 self.viewDidLayoutSubviews()
                 // Ensure button container and buttons are on top and visible
@@ -600,8 +974,9 @@ class ScannerVC: UIViewController {
 extension ScannerVC: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         // Don't stop session here - we need it running for front label capture
-        // Only stop if we're capturing front label (final capture)
-        if currentState == .capturingFrontLabel {
+        // Only stop if we're capturing front label (final capture) AND it's groceries mode
+        // For supplements, we keep session running between captures
+        if currentState == .capturingFrontLabel && scannerMode == .groceries {
             captureSession?.stopRunning()
         }
         
@@ -663,39 +1038,46 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
         
         print("Scanner: Image extracted successfully, processing...")
         
-        // Handle based on current state
+        // Handle based on current state and mode
         switch currentState {
         case .scanningBarcode, .barcodeDetected:
-            // This is the auto-captured barcode image
-            barcodeImage = capturedImage
-            if let barcode = detectedBarcode {
-                print("Scanner: Processing barcode image with barcode: \(barcode)")
-                processBarcodeImage(capturedImage, barcode: barcode)
-                // Restart session for front label capture
-                startSession()
-                // Transition to front label capture state
-                transitionToState(.capturingFrontLabel)
-            } else {
-                // Fallback: detect barcode from image
-                detectBarcode(in: capturedImage) { [weak self] barcode in
-                    if let barcode = barcode {
-                        print("Scanner: Barcode detected from image: \(barcode)")
-                        self?.processBarcodeImage(capturedImage, barcode: barcode)
-                        // Restart session for front label capture
-                        self?.startSession()
-                        self?.transitionToState(.capturingFrontLabel)
-                    } else {
-                        print("Scanner: No barcode detected, canceling")
-                        self?.delegate?.didCancel()
+            // This is the auto-captured barcode image (groceries only)
+            if scannerMode == .groceries {
+                barcodeImage = capturedImage
+                if let barcode = detectedBarcode {
+                    print("Scanner: Processing barcode image with barcode: \(barcode)")
+                    processBarcodeImage(capturedImage, barcode: barcode)
+                    // Restart session for front label capture
+                    startSession()
+                    // Transition to front label capture state
+                    transitionToState(.capturingFrontLabel)
+                } else {
+                    // Fallback: detect barcode from image
+                    detectBarcode(in: capturedImage) { [weak self] barcode in
+                        if let barcode = barcode {
+                            print("Scanner: Barcode detected from image: \(barcode)")
+                            self?.processBarcodeImage(capturedImage, barcode: barcode)
+                            // Restart session for front label capture
+                            self?.startSession()
+                            self?.transitionToState(.capturingFrontLabel)
+                        } else {
+                            print("Scanner: No barcode detected, canceling")
+                            self?.delegate?.didCancel()
+                        }
                     }
                 }
             }
             
         case .capturingFrontLabel:
             // This is the front label image
-            print("Scanner: Processing front label image")
-            processFrontLabelImage(capturedImage)
-            
+            if scannerMode == .supplements {
+                // Handle supplements two-phase capture
+                handleSupplementCapture(capturedImage)
+            } else {
+                // Groceries: process front label image
+                print("Scanner: Processing front label image")
+                processFrontLabelImage(capturedImage)
+            }
         }
     }
     
@@ -805,6 +1187,8 @@ extension ScannerVC: AVCapturePhotoCaptureDelegate {
 
 extension ScannerVC: AVCaptureMetadataOutputObjectsDelegate {
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        // Only process barcodes in groceries mode
+        guard scannerMode == .groceries else { return }
         // Only process if we're in scanning state
         guard currentState == .scanningBarcode else { return }
         

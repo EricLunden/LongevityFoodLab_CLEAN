@@ -3575,7 +3575,7 @@ struct MealTrackingView: View {
             analysis += "a balanced meal with lean protein, colorful vegetables, and healthy fats. "
         }
         
-        analysis += "These choices will provide essential nutrients, antioxidants, and anti-inflammatory compounds that support cellular health and longevity."
+        analysis += "These choices provide essential nutrients, antioxidants, and compounds that are part of dietary patterns researched for cellular health and longevity."
         
         return analysis.trimmingCharacters(in: .whitespaces)
     }
@@ -3642,7 +3642,7 @@ struct MealTrackingView: View {
         
         // Second paragraph with recommendations
         analysis += "\n\n"
-        analysis += "To boost your average longevity score, try these specific meal recommendations: Add turmeric-spiced salmon with leafy greens for anti-inflammatory benefits, include avocado and nuts for heart-healthy fats, and choose steel-cut oats with berries for stable blood sugar. These choices will provide essential nutrients, antioxidants, and anti-inflammatory compounds that support cellular health and longevity."
+        analysis += "To boost your average longevity score, try these specific meal recommendations: Add turmeric-spiced salmon with leafy greens for nutrients commonly studied in relation to inflammation, include avocado and nuts for heart-healthy fats, and choose steel-cut oats with berries for nutrients associated with blood sugar function. These choices provide essential nutrients, antioxidants, and compounds that are part of dietary patterns researched for cellular health and longevity."
         
         return analysis.trimmingCharacters(in: .whitespaces)
     }
@@ -5513,7 +5513,7 @@ extension MealTrackingView {
         // Analyze fiber content
         if let fiber = Double(nutrition2.fiber.replacingOccurrences(of: "g", with: "")) {
             if fiber >= 8 {
-                nutrients.append("High fiber (\(Int(fiber))g) promotes gut microbiome diversity and reduces inflammation.")
+                nutrients.append("High fiber (\(Int(fiber))g) is associated with gut microbiome diversity and is part of dietary patterns researched for normal inflammatory function.")
             } else if fiber >= 4 {
                 nutrients.append("Good fiber content (\(Int(fiber))g) supports digestive health and satiety.")
             }
@@ -5537,34 +5537,34 @@ extension MealTrackingView {
             let name = ingredient.name.lowercased()
             
             if name.contains("coffee") || name.contains("caffeine") {
-                compounds.append("Caffeine and chlorogenic acids provide neuroprotective benefits and enhance cognitive function.")
+                compounds.append("Caffeine and chlorogenic acids are compounds commonly studied in relation to cognitive function.")
             }
             if name.contains("lemon") || name.contains("citrus") {
-                compounds.append("Citrus flavonoids like hesperidin support cardiovascular health and reduce oxidative stress.")
+                compounds.append("Citrus flavonoids like hesperidin are part of dietary patterns researched for cardiovascular health.")
             }
             if name.contains("berry") || name.contains("blueberry") || name.contains("strawberry") {
-                compounds.append("Anthocyanins and polyphenols protect against age-related cognitive decline and inflammation.")
+                compounds.append("Anthocyanins and polyphenols are compounds commonly studied in relation to cognitive function and inflammation.")
             }
             if name.contains("green") || name.contains("leafy") || name.contains("spinach") || name.contains("kale") {
-                compounds.append("Lutein, zeaxanthin, and folate support eye health and DNA methylation processes.")
+                compounds.append("Lutein, zeaxanthin, and folate are nutrients commonly studied in relation to eye health.")
             }
             if name.contains("fish") || name.contains("salmon") || name.contains("omega") {
-                compounds.append("Omega-3 fatty acids reduce inflammation and support brain membrane integrity.")
+                compounds.append("Omega-3 fatty acids are nutrients commonly studied in relation to inflammation and brain function.")
             }
             if name.contains("olive") || name.contains("extra virgin") {
-                compounds.append("Oleocanthal and oleuropein provide anti-inflammatory effects similar to ibuprofen.")
+                compounds.append("Oleocanthal and oleuropein are compounds commonly studied in relation to inflammation.")
             }
             if name.contains("turmeric") || name.contains("curcumin") {
-                compounds.append("Curcumin modulates multiple longevity pathways including mTOR and AMPK signaling.")
+                compounds.append("Curcumin is a compound commonly studied in relation to longevity pathways.")
             }
             if name.contains("garlic") || name.contains("onion") {
-                compounds.append("Allicin and organosulfur compounds support cardiovascular health and immune function.")
+                compounds.append("Allicin and organosulfur compounds are part of dietary patterns researched for cardiovascular and immune function.")
             }
             if name.contains("ginger") {
-                compounds.append("Gingerols provide anti-inflammatory and anti-nausea effects while supporting digestive health.")
+                compounds.append("Gingerols are compounds commonly studied in relation to inflammation and digestive function.")
             }
             if name.contains("cocoa") || name.contains("dark chocolate") {
-                compounds.append("Flavonoids improve endothelial function and support cognitive performance.")
+                compounds.append("Flavonoids are compounds commonly studied in relation to endothelial and cognitive function.")
             }
         }
         
@@ -5578,22 +5578,22 @@ extension MealTrackingView {
         let scores = analysis.healthScores
         
         if scores.heartHealth >= 8 {
-            mechanisms.append("These nutrients support endothelial function and reduce cardiovascular disease risk.")
+            mechanisms.append("These nutrients are commonly studied in relation to endothelial function and are part of dietary patterns researched for cardiovascular health.")
         }
         if scores.brainHealth >= 8 {
-            mechanisms.append("Neuroprotective compounds enhance synaptic plasticity and cognitive resilience.")
+            mechanisms.append("Compounds commonly studied in relation to brain health are part of dietary patterns associated with cognitive function.")
         }
         if scores.antiInflammation >= 8 {
-            mechanisms.append("Anti-inflammatory compounds modulate NF-κB and COX-2 pathways to reduce chronic inflammation.")
+            mechanisms.append("Compounds commonly studied in relation to inflammation are part of dietary patterns researched for normal inflammatory function.")
         }
         if scores.immune >= 8 {
-            mechanisms.append("Immune-supporting nutrients enhance T-cell function and reduce infection susceptibility.")
+            mechanisms.append("Nutrients commonly studied in relation to immune function are part of dietary patterns associated with immune health.")
         }
         if scores.bloodSugar >= 8 {
-            mechanisms.append("Blood sugar regulation supports insulin sensitivity and reduces diabetes risk.")
+            mechanisms.append("Nutrients commonly studied in relation to blood sugar are part of dietary patterns associated with glucose metabolism.")
         }
         if scores.energy >= 8 {
-            mechanisms.append("Mitochondrial nutrients enhance cellular energy production and reduce fatigue.")
+            mechanisms.append("Nutrients commonly studied in relation to energy are part of dietary patterns associated with energy metabolism.")
         }
         
         return mechanisms

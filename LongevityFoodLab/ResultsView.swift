@@ -58,6 +58,10 @@ struct ResultsView: View {
     @State private var isMicrosExpanded = false
     @State private var isBestPracticesExpanded = false
     
+    // Product dropdown expansion state
+    @State private var isProductMacrosExpanded = false
+    @State private var isProductMicrosExpanded = false
+    
     // Loading states
     @State private var isLoadingKeyBenefits = false
     @State private var isLoadingIngredients = false
@@ -406,6 +410,16 @@ struct ResultsView: View {
                         
                         // Ingredients Analysis dropdown (renamed from Nutritional Components Analysis)
                         ingredientsAnalysisDropdown
+                        
+                        // Product Macronutrients dropdown (only for products)
+                        if isGrocery {
+                            productMacrosDropdown
+                        }
+                        
+                        // Product Micronutrients dropdown (only for products)
+                        if isGrocery {
+                            productMicrosDropdown
+                        }
                         
                         // Your Macronutrients dropdown (hidden for groceries only)
                         if !isGrocery {
@@ -1185,6 +1199,253 @@ struct ResultsView: View {
     struct MicroTargetItem: Identifiable {
         let id = UUID()
         let name: String
+    }
+    
+    // MARK: - Product Macronutrients Dropdown (Simple Style)
+    private var productMacrosDropdown: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isProductMacrosExpanded.toggle()
+                        if isProductMacrosExpanded {
+                            let currentNutrition = loadedNutritionInfo ?? currentAnalysis.nutritionInfoOrDefault
+                            if loadedNutritionInfo == nil || !isNutritionInfoValid(currentNutrition) {
+                                loadNutritionInfo()
+                            }
+                        }
+                    }
+                }) {
+                    HStack {
+                        // Icon with bright gradient (purple like tracker)
+                        Image(systemName: "chart.pie.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.purple, Color(red: 0.6, green: 0.2, blue: 0.8)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
+                        
+                        Text("Macronutrients")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        Image(systemName: isProductMacrosExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(colorScheme == .dark ? Color.black : Color(.systemGray6))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                colorScheme == .dark ?
+                                LinearGradient(
+                                    colors: [Color.purple, Color(red: 0.6, green: 0.2, blue: 0.8)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ) :
+                                LinearGradient(colors: [Color.clear], startPoint: .leading, endPoint: .trailing),
+                                lineWidth: colorScheme == .dark ? 1.0 : 0
+                            )
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if isProductMacrosExpanded {
+                    if isLoadingNutritionInfo {
+                        ProgressView()
+                            .padding()
+                    } else {
+                        let nutrition = loadedNutritionInfo ?? currentAnalysis.nutritionInfoOrDefault
+                        productMacrosView(nutrition)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 4)
+                            .background(colorScheme == .dark ? Color.black : Color(.systemGray6))
+                            .cornerRadius(12)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.95)),
+                                removal: .opacity.combined(with: .scale(scale: 0.95))
+                            ))
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Product Micronutrients Dropdown (Simple Style)
+    private var productMicrosDropdown: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isProductMicrosExpanded.toggle()
+                        if isProductMicrosExpanded {
+                            let currentNutrition = loadedNutritionInfo ?? currentAnalysis.nutritionInfoOrDefault
+                            if loadedNutritionInfo == nil || !isNutritionInfoValid(currentNutrition) {
+                                loadNutritionInfo()
+                            }
+                        }
+                    }
+                }) {
+                    HStack {
+                        // Icon with bright gradient (vitamin pill icon)
+                        Image(systemName: "pills.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.orange, Color(red: 1.0, green: 0.6, blue: 0.0)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
+                        
+                        Text("Micronutrients")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        Image(systemName: isProductMicrosExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(colorScheme == .dark ? Color.black : Color(.systemGray6))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                colorScheme == .dark ?
+                                LinearGradient(
+                                    colors: [Color.orange, Color(red: 1.0, green: 0.6, blue: 0.0)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ) :
+                                LinearGradient(colors: [Color.clear], startPoint: .leading, endPoint: .trailing),
+                                lineWidth: colorScheme == .dark ? 1.0 : 0
+                            )
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if isProductMicrosExpanded {
+                    if isLoadingNutritionInfo {
+                        ProgressView()
+                            .padding()
+                    } else {
+                        let nutrition = loadedNutritionInfo ?? currentAnalysis.nutritionInfoOrDefault
+                        productMicrosView(nutrition)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 4)
+                            .background(colorScheme == .dark ? Color.black : Color(.systemGray6))
+                            .cornerRadius(12)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.95)),
+                                removal: .opacity.combined(with: .scale(scale: 0.95))
+                            ))
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Product Macros View (Simple Style)
+    private func productMacrosView(_ nutrition: NutritionInfo) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Calories
+            let calories = parseNutritionValueDouble(nutrition.calories) ?? 0.0
+            productNutritionRow("Calories", "\(Int(round(calories))) kcal")
+            
+            // Protein
+            let protein = parseNutritionValueDouble(nutrition.protein) ?? 0.0
+            productNutritionRow("Protein", "\(String(format: "%.1f", protein))g")
+            
+            // Carbohydrates
+            let carbs = parseNutritionValueDouble(nutrition.carbohydrates) ?? 0.0
+            productNutritionRow("Carbohydrates", "\(String(format: "%.1f", carbs))g")
+            
+            // Fat
+            let fat = parseNutritionValueDouble(nutrition.fat) ?? 0.0
+            productNutritionRow("Fat", "\(String(format: "%.1f", fat))g")
+            
+            // Saturated Fat
+            let saturatedFat = parseNutritionValueDouble(nutrition.saturatedFat) ?? 0.0
+            productNutritionRow("Saturated Fat", "\(String(format: "%.1f", saturatedFat))g")
+            
+            // Fiber
+            let fiber = parseNutritionValueDouble(nutrition.fiber) ?? 0.0
+            productNutritionRow("Fiber", "\(String(format: "%.1f", fiber))g")
+            
+            // Sugar
+            let sugar = parseNutritionValueDouble(nutrition.sugar) ?? 0.0
+            productNutritionRow("Sugar", "\(String(format: "%.1f", sugar))g")
+            
+            // Sodium
+            let sodium = parseNutritionValueDouble(nutrition.sodium) ?? 0.0
+            productNutritionRow("Sodium", "\(Int(round(sodium)))mg")
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 16)
+    }
+    
+    // MARK: - Product Micros View (Simple Style)
+    private func productMicrosView(_ nutrition: NutritionInfo) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Note at the top
+            Text("Packaged foods often don't publish micronutrient content. Available micronutrients are listed below.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+            
+            // All 18 micronutrients (excluding iodine)
+            let allMicros = [
+                "Vitamin D", "Vitamin E", "Potassium", "Vitamin K", "Magnesium",
+                "Vitamin A", "Calcium", "Vitamin C", "Choline", "Iron",
+                "Zinc", "Folate (B9)", "Vitamin B12", "Vitamin B6",
+                "Selenium", "Copper", "Manganese", "Thiamin (B1)"
+            ]
+            
+            // Only show micros with actual values (> 0)
+            ForEach(allMicros, id: \.self) { name in
+                if let value = getMicronutrientValue(nutrition, name: name), value > 0 {
+                    let metadata = micronutrientMetadata(for: name)
+                    productNutritionRow(name, "\(String(format: "%.1f", value))\(metadata.unit)")
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 16)
+    }
+    
+    // MARK: - Product Nutrition Row (Simple Style)
+    private func productNutritionRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            
+            Spacer()
+            
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
     
     // MARK: - Macros View (Tracker Style)

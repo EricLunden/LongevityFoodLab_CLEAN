@@ -1865,10 +1865,11 @@ struct ResultsView: View {
     
     // Check if nutrition values are reasonable (not obviously wrong)
     private func isNutritionReasonable(_ nutrition: NutritionInfo, isMeal: Bool = false) -> Bool {
-        guard let calories = Int(nutrition.calories) else { 
+        guard let caloriesDouble = parseNutritionValueDouble(nutrition.calories) else { 
             // If calories can't be parsed, it's not reasonable
             return false 
         }
+        let calories = Int(round(caloriesDouble))
         
         // For single foods, calories should be reasonable (< 500)
         // For meals/recipes, allow higher calories (up to 2000)

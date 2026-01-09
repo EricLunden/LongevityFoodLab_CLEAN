@@ -1,0 +1,105 @@
+================================================================================
+AWS LAMBDA GOLD PRODUCTION CONFIGURATION
+Version: 141
+Capture Date: January 1, 2026
+Status: READ-ONLY AUDIT - NO CHANGES MADE
+================================================================================
+
+FUNCTION IDENTITY
+-----------------
+Function Name: longevity-recipe-parser
+Function ARN: arn:aws:lambda:us-east-2:443752887895:function:longevity-recipe-parser:141
+Version: 141
+Description: Version141_RS_restored
+State: Active
+Last Modified: 2025-12-31T17:07:27.000+0000
+
+PRODUCTION ALIAS
+----------------
+Alias Name: prod
+Alias ARN: arn:aws:lambda:us-east-2:443752887895:function:longevity-recipe-parser:prod
+Points to Version: 141
+Alias Description: Filter_fix
+Revision ID: 366780af-1d8a-42bc-8285-2cec75fcbe25
+
+RUNTIME CONFIGURATION
+---------------------
+Runtime: python3.11
+Handler: lambda_function.lambda_handler
+Architecture: x86_64
+Package Type: Zip
+Code Size: 30,319,266 bytes (~30.3 MB)
+Code SHA256: duunNQ/3cuU3xUGCqSe9LHLFFCMyW7JM0PErXMMhYl4=
+
+RESOURCE ALLOCATION
+-------------------
+Memory: 1024 MB
+Timeout: 90 seconds
+Ephemeral Storage: 512 MB
+Layers: None
+
+ENVIRONMENT VARIABLES
+---------------------
+(Values redacted for security - names only)
+
+1. YOUTUBE_API_KEY
+2. APIFY_TOKEN
+3. FORCE_COLD_START
+4. YOUTUBE_REFRESH_TOKEN
+5. OPENAI_API_KEY
+6. AI_MIN_TRIGGER_SCORE
+7. BUILD_ID
+8. YOUTUBE_CLIENT_ID
+9. AI_TIER_ENABLED
+10. AI_TIMEOUT_MS
+11. YOUTUBE_CLIENT_SECRET
+
+MONITORING & LOGGING
+--------------------
+Log Format: Text
+Log Group: /aws/lambda/longevity-recipe-parser
+Tracing Mode: PassThrough (X-Ray disabled)
+
+IAM ROLE
+--------
+Role ARN: arn:aws:iam::443752887895:role/service-role/longevity-recipe-parser-role-eanxitws
+
+OTHER ALIASES (for reference)
+-----------------------------
+staging: Points to version 145
+
+RUNTIME VERSION
+---------------
+Runtime Version ARN: arn:aws:lambda:us-east-2::runtime:49f733259c7ce7e0deee75ff91c6afe35c7d58b04ed300f32701216263b4590c
+
+SNAPSTART
+---------
+Apply On: None
+Optimization Status: Off
+
+================================================================================
+AUDIT NOTES
+================================================================================
+
+This configuration was captured via AWS CLI read-only commands.
+No changes were made to the Lambda function, aliases, or environment variables.
+
+To restore this exact configuration:
+1. Deploy code package matching Code SHA256: duunNQ/3cuU3xUGCqSe9LHLFFCMyW7JM0PErXMMhYl4=
+2. Set runtime to python3.11
+3. Set memory to 1024 MB
+4. Set timeout to 90 seconds
+5. Set architecture to x86_64
+6. Configure all 11 environment variables listed above
+7. Point prod alias to the restored version
+
+CRITICAL: Environment variable values are NOT stored in this document for security.
+Restore from secure credential storage (AWS Secrets Manager, etc.).
+
+================================================================================
+END OF CONFIGURATION DOCUMENT
+================================================================================
+
+
+
+

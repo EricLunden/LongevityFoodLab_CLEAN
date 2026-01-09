@@ -222,6 +222,13 @@ class USDAService: ObservableObject {
         let normalizedQuery = normalizeFoodName(query)
         let queryWords = normalizedQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         
+        // Identify cooking method words (these are modifiers, not main foods)
+        let cookingMethods = ["broiled", "grilled", "baked", "roasted", "steamed", "fried", "cooked", "boiled", "poached", "sauteed", "seared", "braised", "stewed", "roast", "steam", "grill", "bake", "fry", "boil"]
+        
+        // Separate main food words from cooking methods
+        let mainFoodWords = queryWords.filter { !cookingMethods.contains($0.lowercased()) }
+        let cookingMethodWords = queryWords.filter { cookingMethods.contains($0.lowercased()) }
+        
         // Detect if query is a simple, single-word food (like "apple", "banana", "salmon")
         let isSimpleFood = queryWords.count == 1 && normalizedQuery.count < 15
         
@@ -251,20 +258,63 @@ class USDAService: ObservableObject {
                 }
             }
             
-            // Check if query words appear in description
-            for word in queryWords {
+            // PRIORITIZE MAIN FOOD WORDS over cooking methods
+            // Main food words get much higher scores
+            for word in mainFoodWords {
                 if description.contains(word) {
-                    score += 100
+                    score += 200 // Higher base score for main food word
                     
-                    // Bonus if word appears at the start (main ingredient)
+                    // Big bonus if main food word appears at the start (main ingredient)
                     if description.hasPrefix(word) || description.hasPrefix("\(word) ") {
-                        score += 50
+                        score += 150 // Very high bonus for main food at start
                     }
                     
-                    // Penalty if word appears after a comma (likely a modifier)
+                    // Penalty if main food word appears after a comma (likely a modifier)
                     if let commaIndex = description.firstIndex(of: ","),
                        description[commaIndex...].contains(word) {
-                        score -= 30
+                        score -= 50 // Higher penalty for main food word in modifier position
+                    }
+                } else {
+                    // Heavy penalty if main food word is missing
+                    score -= 300
+                }
+            }
+            
+            // Cooking method words get lower scores (they're modifiers)
+            for word in cookingMethodWords {
+                if description.contains(word) {
+                    score += 50 // Lower score for cooking method
+                    
+                    // Small bonus if cooking method appears early (but not at start)
+                    if description.contains("\(word) ") && !description.hasPrefix(word) {
+                        score += 20
+                    }
+                    
+                    // Penalty if cooking method appears after a comma (less important)
+                    if let commaIndex = description.firstIndex(of: ","),
+                       description[commaIndex...].contains(word) {
+                        score -= 10
+                    }
+                }
+                // Don't penalize if cooking method is missing - it's optional
+            }
+            
+            // Fallback: Check all query words (for backward compatibility)
+            if mainFoodWords.isEmpty && cookingMethodWords.isEmpty {
+                for word in queryWords {
+                    if description.contains(word) {
+                        score += 100
+                        
+                        // Bonus if word appears at the start (main ingredient)
+                        if description.hasPrefix(word) || description.hasPrefix("\(word) ") {
+                            score += 50
+                        }
+                        
+                        // Penalty if word appears after a comma (likely a modifier)
+                        if let commaIndex = description.firstIndex(of: ","),
+                           description[commaIndex...].contains(word) {
+                            score -= 30
+                        }
                     }
                 }
             }
@@ -350,10 +400,15 @@ class USDAService: ObservableObject {
             
             // Map USDA nutrient names to our NutritionInfo fields
             let normalizedName = nutrientName.lowercased()
+            let unitName = nutrient.nutrient?.unitName?.lowercased() ?? ""
             
             // Macros
             if normalizedName.contains("energy") || normalizedName == "energy" {
-                nutritionDict["calories"] = amountValue
+                // Only use Energy entries with unit "kcal" or "KCAL", ignore "kJ" or "KJ"
+                if unitName == "kcal" {
+                    nutritionDict["calories"] = amountValue
+                }
+                // Skip kJ entries - they're not calories
             } else if normalizedName.contains("protein") {
                 nutritionDict["protein"] = amountValue
             } else if normalizedName.contains("carbohydrate") && !normalizedName.contains("fiber") && !normalizedName.contains("sugar") {

@@ -46,16 +46,42 @@ class AIService {
         Food: \(foodName)
         \(summary != nil ? "Context: \(summary!)" : "")
         
-        Estimate realistic amounts of each main ingredient in a typical serving (not the full recipe).
+        CRITICAL: If this is a SIMPLE SINGLE FOOD (not a recipe or complex meal), return an empty array [].
+        
+        Simple single foods include:
+        - Single proteins: "Broiled salmon", "Grilled chicken", "Baked cod", "Roast beef", "Scrambled eggs", "Boiled egg"
+        - Single fruits/vegetables: "Apple", "Banana", "Broccoli", "Carrots", "Spinach"
+        - Single grains: "Rice", "Quinoa", "Oatmeal", "Toast"
+        - Single prepared items with cooking method: "Broiled salmon", "Grilled chicken", "Baked potato", "Steamed broccoli"
+        
+        ONLY extract components for COMPLEX MEALS/RECIPES that contain multiple distinct ingredients:
+        - "Chicken salad" (chicken + lettuce + tomatoes + dressing)
+        - "Apple pie" (apples + crust + sugar + butter)
+        - "Lasagna" (pasta + meat + cheese + sauce)
+        - "Pizza" (dough + cheese + toppings)
+        - "Spiced pear berry crumble" (pears + berries + flour + sugar + butter)
+        
+        For simple single foods, return: []
+        
+        For complex meals, estimate realistic amounts of each main ingredient in a typical serving (not the full recipe).
         Return a JSON array with ingredient names and their estimated weight in grams for ONE typical serving.
         
-        Examples:
+        Examples of COMPLEX meals (extract components):
         - "Apple Pie" (1 slice) -> [{"name": "apples", "amountGrams": 80}, {"name": "flour", "amountGrams": 40}, {"name": "sugar", "amountGrams": 25}, {"name": "butter", "amountGrams": 15}, {"name": "cinnamon", "amountGrams": 2}]
         - "Spiced Pear Berry Crumble" (1 serving) -> [{"name": "pears", "amountGrams": 50}, {"name": "berries", "amountGrams": 30}, {"name": "flour", "amountGrams": 40}, {"name": "sugar", "amountGrams": 20}, {"name": "butter", "amountGrams": 15}, {"name": "spices", "amountGrams": 5}]
         - "Chicken Salad" (1 cup) -> [{"name": "chicken", "amountGrams": 60}, {"name": "lettuce", "amountGrams": 30}, {"name": "tomatoes", "amountGrams": 20}, {"name": "mayonnaise", "amountGrams": 15}, {"name": "onions", "amountGrams": 10}]
         
+        Examples of SIMPLE foods (return empty array):
+        - "Broiled salmon" -> []
+        - "Grilled chicken" -> []
+        - "Apple" -> []
+        - "Scrambled eggs" -> []
+        - "Baked potato" -> []
+        - "Steamed broccoli" -> []
+        
         Return ONLY this JSON format (no markdown, no explanation):
         [{"name": "ingredient1", "amountGrams": number}, {"name": "ingredient2", "amountGrams": number}]
+        OR [] for simple single foods
         """
         
         do {

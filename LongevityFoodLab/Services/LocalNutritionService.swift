@@ -384,9 +384,16 @@ class LocalNutritionService {
         
         // For simple foods, heavily penalize complex/processed foods
         if isSimpleFood {
-            // Penalty for complex foods (contains multiple ingredients separated by commas)
-            if nameLower.contains(",") || descLower.contains(",") {
-                score -= 200 // Heavy penalty for complex foods when searching simple
+            // Penalty for complex foods - but NOT for USDA-style "category, specific, type" format
+            let commaCount = nameLower.filter { $0 == "," }.count
+            // USDA format like "fish, salmon, coho, raw" should NOT be penalized
+            // Only penalize if it looks like multiple ingredients (e.g., "chicken and rice")
+            if nameLower.contains(" and ") || nameLower.contains(" with ") || nameLower.contains(" in ") {
+                score -= 200
+            }
+            // Light penalty for many commas (4+) suggesting very complex item
+            else if commaCount >= 4 {
+                score -= 100
             }
             
             // Penalty for processed foods (croissants, pie, cake, etc.)
@@ -648,6 +655,79 @@ class LocalNutritionService {
             }
         }
         
+        // FISH/SEAFOOD-SPECIFIC SCORING
+        // Fish names should prefer "fish, ..." entries and penalize non-fish matches
+        let fishNames = ["salmon", "tuna", "cod", "tilapia", "trout", "halibut", "bass", "mackerel", "sardine", "anchovy", "catfish", "snapper", "mahi", "swordfish", "flounder", "sole", "perch", "walleye", "pike", "carp", "herring"]
+        
+        for fish in fishNames {
+            if queryLower == fish || queryLower == "\(fish)s" || queryLower.hasSuffix(" \(fish)") {
+                // BIG BONUS for entries that start with "fish," - these are actual fish
+                if nameLower.hasPrefix("fish,") && nameLower.contains(fish) {
+                    score += 600
+                }
+                
+                // HEAVY PENALTY for berry/fruit matches (e.g., "salmonberries" when searching "salmon")
+                if combinedText.contains("berr") || combinedText.contains("fruit") {
+                    score -= 800
+                }
+                
+                // Penalty for non-seafood items that happen to contain the fish name
+                if !nameLower.hasPrefix("fish,") && !nameLower.hasPrefix(fish) && !combinedText.contains("seafood") {
+                    // If it doesn't start with "fish," or the fish name, it's probably not the fish
+                    if combinedText.contains("sauce") || combinedText.contains("cake") || combinedText.contains("soup") {
+                        score -= 300
+                    }
+                }
+                
+                // Boost for raw/fresh fish
+                if combinedText.contains("raw") || combinedText.contains("fresh") {
+                    score += 150
+                }
+                
+                break // Only apply once per query
+            }
+        }
+        
+        // SHELLFISH/SEAFOOD-SPECIFIC SCORING
+        let shellfishNames = ["shrimp", "crab", "lobster", "scallop", "clam", "mussel", "oyster", "crawfish", "crayfish", "prawn"]
+        
+        for shellfish in shellfishNames {
+            if queryLower == shellfish || queryLower == "\(shellfish)s" || queryLower.hasSuffix(" \(shellfish)") {
+                // Penalty for non-seafood items
+                if combinedText.contains("cake") || combinedText.contains("sauce") || combinedText.contains("soup") || combinedText.contains("bisque") {
+                    if !nameLower.hasPrefix(shellfish) {
+                        score -= 300
+                    }
+                }
+                
+                // Boost for raw/fresh
+                if combinedText.contains("raw") || combinedText.contains("fresh") || combinedText.contains("cooked") {
+                    score += 150
+                }
+                
+                break
+            }
+        }
+        
+        // MEAT-SPECIFIC SCORING (similar pattern for common meats)
+        let meatNames = ["chicken", "beef", "pork", "lamb", "turkey", "duck", "venison", "bison", "veal"]
+        
+        for meat in meatNames {
+            if queryLower == meat || queryLower.hasSuffix(" \(meat)") {
+                // Penalty for non-meat items that contain meat name
+                if combinedText.contains("plant") || combinedText.contains("vegetarian") || combinedText.contains("vegan") {
+                    score -= 400
+                }
+                
+                // Boost for raw/fresh meat entries
+                if combinedText.contains("raw") || combinedText.contains("fresh") || combinedText.contains("ground") {
+                    score += 100
+                }
+                
+                break
+            }
+        }
+        
         // Penalty for branded products when searching for generic items
         if queryWords.count <= 2 && (nameLower.contains("brand") || descLower.contains("brand")) {
             score -= 20
@@ -855,16 +935,32 @@ class LocalNutritionService {
     /// CRITICAL: This method bridges to existing code - returns NutritionInfo (formatted strings)
     /// Uses scoring function to select best match and rejects poor matches to allow fallback
     func getNutritionForFood(_ foodName: String, amount: Double = 100, unit: String = "g") -> NutritionInfo? {
+        // Identify cooking method words (these are modifiers, not main foods)
+        let cookingMethods = ["broiled", "grilled", "baked", "roasted", "steamed", "fried", "cooked", "boiled", "poached", "sauteed", "seared", "braised", "stewed", "roast", "steam", "grill", "bake", "fry", "boil"]
+        
+        let normalizedQuery = foodName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryWords = normalizedQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        
+        // Separate main food words from cooking methods
+        let mainFoodWords = queryWords.filter { !cookingMethods.contains($0) }
+        
         // Search for food (searchFoods will wait for database)
         // Get multiple results to score them properly
-        let foods = searchFoods(query: foodName, limit: 5)
+        var foods = searchFoods(query: foodName, limit: 5)
+        
+        // If no results and query contains cooking method, try searching for just the main food word
+        if foods.isEmpty && !mainFoodWords.isEmpty && mainFoodWords.count < queryWords.count {
+            let mainFoodQuery = mainFoodWords.joined(separator: " ")
+            print("🔍 LocalNutritionService: No exact match for '\(foodName)', trying main food word: '\(mainFoodQuery)'")
+            foods = searchFoods(query: mainFoodQuery, limit: 5)
+        }
+        
         guard !foods.isEmpty else {
             print("🔍 LocalNutritionService: No match found for '\(foodName)'")
             return nil
         }
         
         // Score all results and select the best match
-        let normalizedQuery = foodName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let scoredResults = foods.map { food -> (food: LocalFood, score: Int) in
             let score = calculateRelevanceScore(query: normalizedQuery, food: food)
             return (food: food, score: score)

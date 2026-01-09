@@ -6084,11 +6084,6 @@ struct AddToMealTrackerSheet: View {
     }
     
     private func saveMeal() {
-        print("🔴 SAVEMEAL CALLED")
-        print("🔴 Call stack:")
-        for symbol in Thread.callStackSymbols.prefix(10) {
-            print(symbol)
-        }
         // Look up imageHash and inputMethod from FoodCacheManager (analysis is already cached there)
         // Try to find the exact cached entry by matching the analysis object itself
         var imageHash: String? = nil

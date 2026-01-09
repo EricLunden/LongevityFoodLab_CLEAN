@@ -2473,7 +2473,7 @@ struct ResultsView: View {
             )
             
             // Update the cached entry with the new analysis
-            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: cachedEntry.imageHash, scanType: cachedEntry.scanType)
+            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: cachedEntry.imageHash, scanType: cachedEntry.scanType, inputMethod: cachedEntry.inputMethod)
             
             // Also update currentAnalysis for this view
             currentAnalysis = updatedAnalysis
@@ -6084,6 +6084,11 @@ struct AddToMealTrackerSheet: View {
     }
     
     private func saveMeal() {
+        print("🔴 SAVEMEAL CALLED")
+        print("🔴 Call stack:")
+        for symbol in Thread.callStackSymbols.prefix(10) {
+            print(symbol)
+        }
         // Look up imageHash and inputMethod from FoodCacheManager (analysis is already cached there)
         // Try to find the exact cached entry by matching the analysis object itself
         var imageHash: String? = nil

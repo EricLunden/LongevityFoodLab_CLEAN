@@ -1741,7 +1741,7 @@ struct RecipeAnalysisView: View {
             )
             
             // Update the cached entry with the new analysis
-            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: cachedEntry.imageHash, scanType: cachedEntry.scanType)
+            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: cachedEntry.imageHash, scanType: cachedEntry.scanType, inputMethod: cachedEntry.inputMethod)
             
             // Also update the recipe's fullAnalysisData so meals created from this recipe have the nutrition
             var updatedRecipe = recipe

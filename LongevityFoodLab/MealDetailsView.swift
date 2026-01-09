@@ -1664,7 +1664,7 @@ struct MealDetailsView: View {
             )
             
             // Update the cached entry with the new analysis
-            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: entry.imageHash, scanType: entry.scanType)
+            foodCacheManager.cacheAnalysis(updatedAnalysis, imageHash: entry.imageHash, scanType: entry.scanType, inputMethod: entry.inputMethod)
             
             // Also update local cachedAnalysis
             cachedAnalysis = updatedAnalysis

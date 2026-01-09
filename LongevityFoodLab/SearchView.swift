@@ -39,7 +39,7 @@ struct DetectedFoodRow: View {
     @State private var isDragging = false
     @State private var dragValue: Double = 0.0
     
-    private let sliderRange: ClosedRange<Double> = 0.0...16.0
+    private let sliderRange: ClosedRange<Double> = 0.0...12.0
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -1410,18 +1410,78 @@ struct SearchView: View {
         - Fork length: ~7 inches
         - Smartphone size: ~3-4 oz of meat
 
-        COUNT DISCRETE ITEMS WHEN POSSIBLE:
-        - Olive: ~0.1 oz each (10 olives = 1 oz)
-        - Cherry tomato: ~0.5-1 oz each
-        - Broccoli floret (small): ~0.3 oz each
-        - Broccoli floret (medium): ~0.5 oz each
-        - Meat slice (thin, 3"x2"): ~0.5-0.75 oz each
-        - Meat slice (thick, 3"x2"): ~1-1.5 oz each
-        - Shrimp (medium): ~0.3 oz each
-        - Meatball (golf ball size): ~1 oz each
-
-        MEAT/PROTEIN BY VISUAL SIZE:
-        - 2-3 thin slices of steak/beef: 1-2 oz
+        ════════════════════════════════════════════════════════════════════════════
+        CRITICAL - COUNT DISCRETE ITEMS, DON'T GUESS:
+        ════════════════════════════════════════════════════════════════════════════
+        
+        When food appears as individual pieces, slices, or discrete items, you MUST:
+        1. COUNT the actual number of pieces visible
+        2. MULTIPLY by the per-piece weight
+        3. DO NOT default to "typical serving" weights
+        
+        SLICED MEATS (count slices × weight per slice):
+        - Thin deli-style slice: 0.5-0.75 oz each
+        - Medium restaurant slice: 0.75-1.0 oz each  
+        - Thick carved slice: 1.0-1.5 oz each
+        - Examples:
+          * 2 thin steak slices = 1.0-1.5 oz (NOT 3-4 oz "typical steak")
+          * 3 slices roast beef = 1.5-2.25 oz
+          * 4 deli turkey slices = 2-3 oz
+        
+        PROTEINS BY PIECE:
+        - Shrimp (medium): 0.3 oz each → 6 shrimp = 1.8 oz
+        - Shrimp (large/jumbo): 0.5 oz each → 6 shrimp = 3 oz
+        - Meatball (golf ball): 1 oz each → 3 meatballs = 3 oz
+        - Chicken tender/strip: 1-1.5 oz each → 3 tenders = 3-4.5 oz
+        - Chicken wing: 1 oz meat each (excluding bone)
+        - Bacon strip: 0.3 oz each → 3 strips = 1 oz
+        - Sausage link (breakfast): 1 oz each
+        - Sausage link (Italian): 2-3 oz each
+        - Fish stick: 1 oz each
+        - Chicken nugget: 0.5 oz each → 6 nuggets = 3 oz
+        
+        VEGETABLES BY PIECE:
+        - Broccoli floret (small): 0.3 oz each
+        - Broccoli floret (medium): 0.5 oz each
+        - Broccoli floret (large): 0.75 oz each
+        - Cherry tomato: 0.5 oz each → 4 cherry tomatoes = 2 oz
+        - Baby carrot: 0.4 oz each → 5 baby carrots = 2 oz
+        - Carrot stick: 0.3 oz each
+        - Asparagus spear: 0.5 oz each
+        - Brussels sprout: 0.5 oz each
+        - Mushroom (button): 0.3 oz each
+        - Mushroom (cremini): 0.5 oz each
+        - Olive: 0.1 oz each → 5 olives = 0.5 oz
+        - Pickle spear: 1 oz each
+        - Cucumber slice: 0.2 oz each
+        
+        FRUITS BY PIECE:
+        - Strawberry (medium): 0.5 oz each
+        - Grape: 0.15 oz each → 10 grapes = 1.5 oz
+        - Blueberries: 0.05 oz each (estimate by cluster)
+        - Orange segment: 0.5 oz each
+        - Apple slice: 0.5 oz each
+        - Melon cube (1 inch): 0.5 oz each
+        
+        OTHER COUNTABLES:
+        - Ravioli: 0.75 oz each
+        - Dumpling/potsticker: 1 oz each
+        - Sushi roll piece: 1 oz each
+        - Crouton: 0.1 oz each
+        - Cheese cube (1 inch): 0.5 oz each
+        
+        COUNTING RULES:
+        1. If you can see individual pieces → COUNT THEM
+        2. Multiply count × per-piece weight from list above
+        3. If pieces are partially hidden, estimate total based on visible portion
+        4. NEVER use "typical serving" when discrete items are visible
+        5. Say "I count approximately X pieces" in your reasoning
+        
+        ════════════════════════════════════════════════════════════════════════════
+        MEAT/PROTEIN BY VISUAL SIZE (for whole pieces, not sliced):
+        ════════════════════════════════════════════════════════════════════════════
+        
+        Whole pieces (not sliced):
         - Small piece (deck of cards, 3"x2"x0.5"): 2-3 oz
         - Medium piece (palm size, 4"x3"x0.75"): 4-5 oz
         - Large piece (hand size, 5"x4"x1"): 6-8 oz
@@ -1603,8 +1663,8 @@ struct SearchView: View {
                     // Use AI's estimatedOz if confidence is "high" or "medium"
                     let initialServingSize: Double?
                     if portion.confidence == "high" || portion.confidence == "medium" {
-                        // Cap at 16oz max (slider range)
-                        initialServingSize = min(portion.estimatedOz, 16.0)
+                        // Cap at 12oz max (slider range)
+                        initialServingSize = min(portion.estimatedOz, 12.0)
                         print("✅ SearchView: Using AI portion estimate for '\(foodName)': \(String(format: "%.1f", initialServingSize!)) oz (confidence: \(portion.confidence))")
                     } else {
                         // Low confidence - will estimate via AI fallback
@@ -1655,8 +1715,8 @@ struct SearchView: View {
                             if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
                                 // Only update if servingSize is nil (not already set from foodPortions)
                                 if food.servingSize == nil {
-                                    // Cap at 16oz max (slider range)
-                                    let cappedOunces = min(ounces, 16.0)
+                                    // Cap at 12oz max (slider range)
+                                    let cappedOunces = min(ounces, 12.0)
                                     food.servingSize = cappedOunces
                                     // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
                                     print("✅ SearchView: Updated serving size for '\(foodName)' to \(String(format: "%.1f", cappedOunces)) oz (AI fallback)")
@@ -1669,12 +1729,12 @@ struct SearchView: View {
                         }
                     } catch {
                         print("⚠️ SearchView: Failed to estimate serving size for '\(foodName)', using default 3.5 oz: \(error)")
-                        // Default to 3.5 oz (approximately 100g) - capped at 16oz
+                        // Default to 3.5 oz (approximately 100g) - capped at 12oz
                         DispatchQueue.main.async {
                             if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
                                 // Only set default if servingSize is nil
                                 if food.servingSize == nil {
-                                    food.servingSize = min(3.5, 16.0)
+                                    food.servingSize = min(3.5, 12.0)
                                     // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
                                     print("✅ SearchView: Set default serving size for '\(foodName)' to 3.5 oz")
                                 }
@@ -2091,18 +2151,18 @@ struct SearchView: View {
                         // Update the detected food with estimated serving size
                         DispatchQueue.main.async {
                             if let food = self.detectedFoods.first(where: { $0.name == trimmedInput }) {
-                                // Cap at 16oz max (slider range)
-                                let cappedOunces = min(ounces, 16.0)
+                                // Cap at 12oz max (slider range)
+                                let cappedOunces = min(ounces, 12.0)
                                 food.servingSize = cappedOunces
                                 // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
                             }
                         }
                     } catch {
                         print("⚠️ SearchView: Failed to estimate serving size for manually added '\(trimmedInput)', using default 3.5 oz: \(error)")
-                        // Default to 3.5 oz (approximately 100g) - capped at 16oz
+                        // Default to 3.5 oz (approximately 100g) - capped at 12oz
                         DispatchQueue.main.async {
                             if let food = self.detectedFoods.first(where: { $0.name == trimmedInput }) {
-                                food.servingSize = min(3.5, 16.0)
+                                food.servingSize = min(3.5, 12.0)
                                 // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
                             }
                         }

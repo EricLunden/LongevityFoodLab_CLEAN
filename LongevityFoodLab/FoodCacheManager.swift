@@ -45,9 +45,18 @@ class FoodCacheManager: ObservableObject {
         
         print("🔍 FoodCacheManager: Created cache entry with key: \(entry.cacheKey), imageHash: \(imageHash ?? "none")")
         
-        // Remove existing entry if it exists (by cache key or image hash)
+        // Remove existing entry if it exists
         if let imageHash = imageHash {
+            // Image entries: match by imageHash
             cachedAnalyses.removeAll { $0.imageHash == imageHash }
+        } else if inputMethod != nil {
+            // Text/voice entries: match by foodName + inputMethod (no imageHash)
+            // This prevents duplicates when updating nutrition for text/voice entries
+            cachedAnalyses.removeAll { 
+                $0.foodName == analysis.foodName && 
+                $0.inputMethod == inputMethod &&
+                $0.imageHash == nil
+            }
         }
         cachedAnalyses.removeAll { $0.cacheKey == entry.cacheKey }
         

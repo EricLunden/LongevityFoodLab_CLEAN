@@ -367,6 +367,7 @@ struct FoodAnalysisCard: View {
                 ),
                 scanType: "meal",
                 foodNames: nil,
+                foodPortions: nil,
                 suggestions: nil
             )
         ],

@@ -714,6 +714,7 @@ struct CompareHealthInfo: Codable {
                 ),
                 scanType: "food",
                 foodNames: nil,
+                foodPortions: nil,
                 suggestions: nil
             ),
             FoodAnalysis(
@@ -756,6 +757,7 @@ struct CompareHealthInfo: Codable {
                 ),
                 scanType: "food",
                 foodNames: nil,
+                foodPortions: nil,
                 suggestions: nil
             )
         ],

@@ -7,6 +7,13 @@
 
 import Foundation
 
+// MARK: - FoodPortion (for meal scanning with portion estimates)
+struct FoodPortion: Codable, Equatable {
+    let name: String
+    let estimatedOz: Double
+    let confidence: String // "high", "medium", "low"
+}
+
 // MARK: - Data Completeness & Source Tracking
 enum DataCompleteness: String, Codable {
     case complete
@@ -34,7 +41,8 @@ struct FoodAnalysis: Codable, Equatable {
     let servingSize: String
     let nutritionInfo: NutritionInfo? // Optional - loaded on demand
     let scanType: String? // "meal", "food", "product", "supplement", "nutrition_label", "supplement_facts"
-    let foodNames: [String]? // For meals: list of individual food items visible in the image (e.g., ["Grilled Chicken", "Avocado", "Lettuce"])
+    let foodNames: [String]? // For meals: list of individual food items visible in the image (e.g., ["Grilled Chicken", "Avocado", "Lettuce"]) - DEPRECATED: Use foodPortions instead
+    let foodPortions: [FoodPortion]? // For meals: list of individual food items with estimated portions and confidence (NEW - preferred over foodNames)
     let suggestions: [GrocerySuggestion]? // Optional - healthier choice suggestions (cached)
     
     // Supplement-specific fields (nil for groceries/meals)
@@ -198,6 +206,7 @@ struct FoodAnalysis: Codable, Equatable {
             nutritionInfo: nutritionInfo,
             scanType: scanType,
             foodNames: foodNames,
+            foodPortions: foodPortions,
             suggestions: suggestions,
             dataCompleteness: dataCompleteness,
             analysisTimestamp: analysisTimestamp,
@@ -224,7 +233,8 @@ struct FoodAnalysis: Codable, Equatable {
         servingSize = try container.decode(String.self, forKey: .servingSize)
         nutritionInfo = try container.decodeIfPresent(NutritionInfo.self, forKey: .nutritionInfo)
         scanType = try container.decodeIfPresent(String.self, forKey: .scanType)
-        foodNames = try container.decodeIfPresent([String].self, forKey: .foodNames)
+        foodNames = try container.decodeIfPresent([String].self, forKey: .foodNames) // Backward compatibility
+        foodPortions = try container.decodeIfPresent([FoodPortion].self, forKey: .foodPortions) // New field
         suggestions = try container.decodeIfPresent([GrocerySuggestion].self, forKey: .suggestions)
         
         // New fields with defaults for backward compatibility
@@ -254,7 +264,8 @@ struct FoodAnalysis: Codable, Equatable {
         try container.encode(servingSize, forKey: .servingSize)
         try container.encodeIfPresent(nutritionInfo, forKey: .nutritionInfo)
         try container.encodeIfPresent(scanType, forKey: .scanType)
-        try container.encodeIfPresent(foodNames, forKey: .foodNames)
+        try container.encodeIfPresent(foodNames, forKey: .foodNames) // Backward compatibility
+        try container.encodeIfPresent(foodPortions, forKey: .foodPortions) // New field
         try container.encodeIfPresent(suggestions, forKey: .suggestions)
         try container.encodeIfPresent(dataCompleteness, forKey: .dataCompleteness)
         try container.encodeIfPresent(analysisTimestamp, forKey: .analysisTimestamp)
@@ -278,6 +289,7 @@ struct FoodAnalysis: Codable, Equatable {
         case nutritionInfo
         case scanType
         case foodNames
+        case foodPortions
         case suggestions
         case dataCompleteness
         case analysisTimestamp
@@ -302,6 +314,7 @@ struct FoodAnalysis: Codable, Equatable {
         nutritionInfo: NutritionInfo? = nil,
         scanType: String? = nil,
         foodNames: [String]? = nil,
+        foodPortions: [FoodPortion]? = nil,
         suggestions: [GrocerySuggestion]? = nil,
         dataCompleteness: DataCompleteness? = nil,
         analysisTimestamp: Date? = nil,
@@ -323,6 +336,7 @@ struct FoodAnalysis: Codable, Equatable {
         self.nutritionInfo = nutritionInfo
         self.scanType = scanType
         self.foodNames = foodNames
+        self.foodPortions = foodPortions
         self.suggestions = suggestions
         self.dataCompleteness = dataCompleteness
         self.analysisTimestamp = analysisTimestamp

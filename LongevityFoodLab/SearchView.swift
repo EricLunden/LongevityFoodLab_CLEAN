@@ -1156,19 +1156,28 @@ struct SearchView: View {
                 foodCacheManager.cacheAnalysis(analysis, scanType: scanType, inputMethod: nil) // Image entry
             }
             
-            // Extract food names from foodNames array (for meals) or fallback to ingredients
+            // Extract food names and portions from foodPortions (NEW) or foodNames (backward compatibility)
             let foodNames: [String]
-            if let names = analysis.foodNames, !names.isEmpty {
-                // Use foodNames array from API response (preferred for meals)
+            let foodPortions: [FoodPortion]?
+            
+            if let portions = analysis.foodPortions, !portions.isEmpty {
+                // NEW: Use foodPortions array (preferred - includes portion estimates)
+                foodNames = portions.map { $0.name }
+                foodPortions = portions
+            } else if let names = analysis.foodNames, !names.isEmpty {
+                // Fallback: Use foodNames array (backward compatibility)
                 foodNames = names
+                foodPortions = nil
             } else if !analysis.ingredientsOrDefault.isEmpty {
                 // Fallback: extract from ingredients array (for backward compatibility)
                 foodNames = analysis.ingredientsOrDefault.map { $0.name }
+                foodPortions = nil
             } else {
                 // Final fallback: use foodName as single detected food
                 foodNames = [analysis.foodName]
+                foodPortions = nil
             }
-            analyzeDetectedFoods(foodNames)
+            analyzeDetectedFoods(foodNames, foodPortions: foodPortions)
             // Don't clear selectedImage here - keep it for meal analysis flow
             
         case "food":
@@ -1387,9 +1396,74 @@ struct SearchView: View {
 
         Keep it conversational but authoritative. Make them feel the immediate impact of their food choice.
 
+        ════════════════════════════════════════════════════════════════════════════
+        VISUAL PORTION ESTIMATION - CRITICAL INSTRUCTIONS:
+        ════════════════════════════════════════════════════════════════════════════
+
+        **ESTIMATE WHAT YOU ACTUALLY SEE, NOT TYPICAL SERVING SIZES**
+
+        You must analyze the ACTUAL food visible in the image and estimate its weight based on visual appearance, NOT what a "typical serving" would be.
+
+        REFERENCE SIZES (use plate/utensils for scale):
+        - Standard dinner plate: 10-11 inches diameter
+        - Standard salad plate: 7-8 inches diameter
+        - Fork length: ~7 inches
+        - Smartphone size: ~3-4 oz of meat
+
+        COUNT DISCRETE ITEMS WHEN POSSIBLE:
+        - Olive: ~0.1 oz each (10 olives = 1 oz)
+        - Cherry tomato: ~0.5-1 oz each
+        - Broccoli floret (small): ~0.3 oz each
+        - Broccoli floret (medium): ~0.5 oz each
+        - Meat slice (thin, 3"x2"): ~0.5-0.75 oz each
+        - Meat slice (thick, 3"x2"): ~1-1.5 oz each
+        - Shrimp (medium): ~0.3 oz each
+        - Meatball (golf ball size): ~1 oz each
+
+        MEAT/PROTEIN BY VISUAL SIZE:
+        - 2-3 thin slices of steak/beef: 1-2 oz
+        - Small piece (deck of cards, 3"x2"x0.5"): 2-3 oz
+        - Medium piece (palm size, 4"x3"x0.75"): 4-5 oz
+        - Large piece (hand size, 5"x4"x1"): 6-8 oz
+        - Very large (bigger than hand): 8-12 oz
+
+        VEGETABLES BY VISUAL COVERAGE:
+        - Scattered/garnish (few pieces): 0.5-1 oz
+        - Small pile (covers ~5% of plate): 1-2 oz
+        - Medium portion (covers ~10-15% of plate): 2-4 oz
+        - Large portion (covers ~20-25% of plate): 4-6 oz
+        - Very large (covers 1/3+ of plate): 6-10 oz
+
+        LEAFY GREENS (very light):
+        - Small handful of lettuce: 0.5-1 oz
+        - Side salad portion: 1.5-2.5 oz
+        - Large salad base: 3-4 oz
+
+        GRAINS/STARCHES BY VISUAL SIZE:
+        - Small scoop of rice/pasta: 2-3 oz
+        - Medium portion (tennis ball): 4-5 oz
+        - Large portion (baseball): 6-8 oz
+        - Very large (covers 1/3 plate): 8-12 oz
+
+        LIQUIDS/SAUCES:
+        - Drizzle: 0.25-0.5 oz
+        - Small pool: 1 oz
+        - Generous pour: 2-3 oz
+
+        ESTIMATION RULES:
+        1. COUNT items when you can see discrete pieces (slices, florets, olives, etc.)
+        2. COMPARE to plate size - estimate what percentage of the plate each food covers
+        3. CONSIDER thickness/depth - a thin layer vs a pile
+        4. BE PRECISE - "2 thin slices" is NOT the same as "a steak"
+        5. When uncertain, use "medium" confidence and estimate conservatively
+
         IMPORTANT NOTES:
-        - For meals (scanType="meal"), you MUST include a "foodNames" array listing all visible food items (e.g., ["Grilled Chicken", "Avocado", "Mixed Greens", "Tomatoes"]). This is required for the app to show multiple foods in the detection popup.
-        - For single foods (scanType="food"), "foodNames" can be omitted or contain just the single food name.
+        - For meals (scanType="meal"), you MUST include a "foodPortions" array with estimated portion sizes based on VISUAL ANALYSIS of the actual food in the image. Each item should have:
+          * "name": The specific food name (e.g., "Steak Slices" not just "Steak" if you see slices)
+          * "estimatedOz": Estimated weight in ounces based on what you ACTUALLY SEE (count items, compare to plate size, assess thickness)
+          * "confidence": "high" if clearly visible and countable, "medium" if somewhat visible, "low" if obscured or hard to estimate
+        - For backward compatibility, also include "foodNames" array with just the names (e.g., ["Grilled Chicken", "Avocado", "Mixed Greens"])
+        - For single foods (scanType="food"), "foodPortions" and "foodNames" can be omitted or contain just the single food name.
         - Do NOT include keyBenefits, ingredients, nutritionInfo, or bestPreparation in the initial response. These will be loaded on demand.
 
         ════════════════════════════════════════════════════════════════════════════
@@ -1399,6 +1473,11 @@ struct SearchView: View {
             "scanType": "food|meal|product|supplement|nutrition_label|supplement_facts",
             "foodName": "Exact name from image or standard name",
             "foodNames": ["Food 1", "Food 2", "Food 3"],
+            "foodPortions": [
+                {"name": "Food 1", "estimatedOz": 5.0, "confidence": "high"},
+                {"name": "Food 2", "estimatedOz": 3.5, "confidence": "medium"},
+                {"name": "Food 3", "estimatedOz": 2.0, "confidence": "high"}
+            ],
             "needsBackScan": false,
             "overallScore": 0-100,
             "summary": "Write 1-2 sentences, MAX 40 words. Lead with shocking/specific fact. Include ONE specific number. End with impact on: \(healthGoalsText). NO 'should', 'in moderation', 'traditional', 'provides enjoyment'. Use 'your' not 'the user's'.",
@@ -1501,6 +1580,7 @@ struct SearchView: View {
                 nutritionInfo: analysis.nutritionInfo,
                 scanType: scanTypeString,
                 foodNames: analysis.foodNames,
+                foodPortions: analysis.foodPortions,
                 suggestions: analysis.suggestions
             )
         }
@@ -1508,19 +1588,42 @@ struct SearchView: View {
         return analysis
     }
     
-    private func analyzeDetectedFoods(_ foods: [String]) {
+    private func analyzeDetectedFoods(_ foods: [String], foodPortions: [FoodPortion]? = nil) {
         print("🔍 SearchView: Setting detected foods: \(foods)")
+        if let portions = foodPortions {
+            print("🔍 SearchView: Using foodPortions with portion estimates: \(portions.map { "\($0.name): \($0.estimatedOz)oz (\($0.confidence))" }.joined(separator: ", "))")
+        }
         
-        // Initialize with nil serving sizes first, then estimate
+        // Initialize with portion estimates from foodPortions if available, otherwise nil
         DispatchQueue.main.async {
-            self.detectedFoods = foods.map { DetectedFood(name: $0, servingSize: nil) }
+            self.detectedFoods = foods.map { foodName in
+                // Try to find matching FoodPortion for this food
+                if let portions = foodPortions,
+                   let portion = portions.first(where: { $0.name == foodName }) {
+                    // Use AI's estimatedOz if confidence is "high" or "medium"
+                    let initialServingSize: Double?
+                    if portion.confidence == "high" || portion.confidence == "medium" {
+                        // Cap at 16oz max (slider range)
+                        initialServingSize = min(portion.estimatedOz, 16.0)
+                        print("✅ SearchView: Using AI portion estimate for '\(foodName)': \(String(format: "%.1f", initialServingSize!)) oz (confidence: \(portion.confidence))")
+                    } else {
+                        // Low confidence - will estimate via AI fallback
+                        initialServingSize = nil
+                        print("⚠️ SearchView: Low confidence for '\(foodName)', will estimate via AI")
+                    }
+                    return DetectedFood(name: foodName, servingSize: initialServingSize)
+                } else {
+                    // No FoodPortion data - initialize with nil, will estimate via AI
+                    return DetectedFood(name: foodName, servingSize: nil)
+                }
+            }
             self.isReadyToAnalyze = true
             self.showingDetectedFoodsPopup = true // Show popup when foods are detected
             print("🔍 SearchView: isReadyToAnalyze set to: \(self.isReadyToAnalyze)")
             print("🔍 SearchView: detectedFoods count after update: \(self.detectedFoods.count)")
         }
         
-        // Estimate serving sizes using AI (convert grams to ounces)
+        // Estimate serving sizes using AI only for foods without portion estimates or with low confidence
         Task {
             for foodName in foods {
                 // Skip spices
@@ -1528,34 +1631,56 @@ struct SearchView: View {
                     continue
                 }
                 
-                do {
-                    let servingInfo = try await AIService.shared.estimateTypicalServingSize(foodName: foodName, isRecipe: false)
-                    // Convert grams to ounces (1 oz = 28.35g)
-                    let ounces = servingInfo.weightGrams / 28.35
-                    print("✅ SearchView: Estimated serving size for '\(foodName)': \(servingInfo.size) (\(Int(servingInfo.weightGrams))g = \(String(format: "%.1f", ounces)) oz)")
-                    
-                    // Update the detected food with estimated serving size (find by name, not index)
-                    DispatchQueue.main.async {
-                        if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
-                            // Cap at 16oz max (slider range)
-                            let cappedOunces = min(ounces, 16.0)
-                            food.servingSize = cappedOunces
-                            // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
-                            print("✅ SearchView: Updated serving size for '\(foodName)' to \(String(format: "%.1f", cappedOunces)) oz")
-                        } else {
-                            print("⚠️ SearchView: Could not find '\(foodName)' in detectedFoods array to update serving size")
+                // Check if we already have a portion estimate from foodPortions
+                let hasPortionEstimate: Bool
+                if let portions = foodPortions,
+                   let portion = portions.first(where: { $0.name == foodName }),
+                   portion.confidence == "high" || portion.confidence == "medium" {
+                    hasPortionEstimate = true
+                    print("✅ SearchView: Skipping AI estimation for '\(foodName)' - already have portion estimate (\(portion.estimatedOz) oz, confidence: \(portion.confidence))")
+                } else {
+                    hasPortionEstimate = false
+                }
+                
+                // Only estimate via AI if we don't have a good portion estimate
+                if !hasPortionEstimate {
+                    do {
+                        let servingInfo = try await AIService.shared.estimateTypicalServingSize(foodName: foodName, isRecipe: false)
+                        // Convert grams to ounces (1 oz = 28.35g)
+                        let ounces = servingInfo.weightGrams / 28.35
+                        print("✅ SearchView: Estimated serving size for '\(foodName)': \(servingInfo.size) (\(Int(servingInfo.weightGrams))g = \(String(format: "%.1f", ounces)) oz)")
+                        
+                        // Update the detected food with estimated serving size (find by name, not index)
+                        DispatchQueue.main.async {
+                            if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
+                                // Only update if servingSize is nil (not already set from foodPortions)
+                                if food.servingSize == nil {
+                                    // Cap at 16oz max (slider range)
+                                    let cappedOunces = min(ounces, 16.0)
+                                    food.servingSize = cappedOunces
+                                    // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
+                                    print("✅ SearchView: Updated serving size for '\(foodName)' to \(String(format: "%.1f", cappedOunces)) oz (AI fallback)")
+                                } else {
+                                    print("✅ SearchView: Keeping existing serving size for '\(foodName)' (\(String(format: "%.1f", food.servingSize!)) oz)")
+                                }
+                            } else {
+                                print("⚠️ SearchView: Could not find '\(foodName)' in detectedFoods array to update serving size")
+                            }
                         }
-                    }
-                } catch {
-                    print("⚠️ SearchView: Failed to estimate serving size for '\(foodName)', using default 3.5 oz: \(error)")
-                    // Default to 3.5 oz (approximately 100g) - capped at 16oz
-                    DispatchQueue.main.async {
-                        if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
-                            food.servingSize = min(3.5, 16.0)
-                            // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
-                            print("✅ SearchView: Set default serving size for '\(foodName)' to 3.5 oz")
-                        } else {
-                            print("⚠️ SearchView: Could not find '\(foodName)' in detectedFoods array to set default serving size")
+                    } catch {
+                        print("⚠️ SearchView: Failed to estimate serving size for '\(foodName)', using default 3.5 oz: \(error)")
+                        // Default to 3.5 oz (approximately 100g) - capped at 16oz
+                        DispatchQueue.main.async {
+                            if let food = self.detectedFoods.first(where: { $0.name == foodName }) {
+                                // Only set default if servingSize is nil
+                                if food.servingSize == nil {
+                                    food.servingSize = min(3.5, 16.0)
+                                    // @Published will trigger view update automatically via @ObservedObject in DetectedFoodRow
+                                    print("✅ SearchView: Set default serving size for '\(foodName)' to 3.5 oz")
+                                }
+                            } else {
+                                print("⚠️ SearchView: Could not find '\(foodName)' in detectedFoods array to set default serving size")
+                            }
                         }
                     }
                 }
@@ -1659,6 +1784,7 @@ struct SearchView: View {
                     nutritionInfo: fallbackAnalysis.nutritionInfo,
                     scanType: fallbackAnalysis.scanType,
                     foodNames: individualFoodNames,
+                    foodPortions: nil,
                     suggestions: fallbackAnalysis.suggestions
                 )
                 onFoodDetected(mealFallbackAnalysis, self.selectedImage, imageHash, nil)
@@ -1806,6 +1932,7 @@ struct SearchView: View {
                                     nutritionInfo: calculatedNutrition, // Use calculated nutrition for dropdowns
                                     scanType: analysis.scanType,
                                     foodNames: individualFoodNames,
+                                    foodPortions: analysis.foodPortions,
                                     suggestions: analysis.suggestions
                                 )
                                 
@@ -1872,6 +1999,7 @@ struct SearchView: View {
                                     nutritionInfo: analysis.nutritionInfo,
                                     scanType: analysis.scanType,
                                     foodNames: individualFoodNames,
+                                    foodPortions: analysis.foodPortions,
                                     suggestions: analysis.suggestions
                                 )
                                 
@@ -1898,6 +2026,7 @@ struct SearchView: View {
                                     nutritionInfo: fallbackAnalysis.nutritionInfo,
                                     scanType: fallbackAnalysis.scanType,
                                     foodNames: individualFoodNames,
+                                    foodPortions: nil,
                                     suggestions: fallbackAnalysis.suggestions
                                 )
                                 
@@ -1927,6 +2056,7 @@ struct SearchView: View {
                         nutritionInfo: fallbackAnalysis.nutritionInfo,
                         scanType: fallbackAnalysis.scanType,
                         foodNames: individualFoodNames,
+                        foodPortions: nil,
                         suggestions: fallbackAnalysis.suggestions
                     )
                     

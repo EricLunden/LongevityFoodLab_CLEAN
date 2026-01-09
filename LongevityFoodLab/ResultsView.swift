@@ -581,6 +581,7 @@ struct ResultsView: View {
                                 nutritionInfo: currentAnalysis.nutritionInfo,
                                 scanType: currentAnalysis.scanType,
                                 foodNames: currentAnalysis.foodNames,
+                                foodPortions: currentAnalysis.foodPortions,
                                 suggestions: currentAnalysis.suggestions
                             )
                             showingServingSizeEditor = false
@@ -2446,6 +2447,7 @@ struct ResultsView: View {
                 nutritionInfo: nutrition, // Updated nutrition info
                 scanType: cachedEntry.fullAnalysis.scanType,
                 foodNames: cachedEntry.fullAnalysis.foodNames,
+                foodPortions: cachedEntry.fullAnalysis.foodPortions,
                 suggestions: cachedEntry.fullAnalysis.suggestions
             )
             
@@ -4669,6 +4671,7 @@ struct ResultsView: View {
                         nutritionInfo: currentAnalysis.nutritionInfo,
                         scanType: currentAnalysis.scanType,
                         foodNames: currentAnalysis.foodNames,
+                        foodPortions: currentAnalysis.foodPortions,
                         suggestions: currentAnalysis.suggestions,
                         dataCompleteness: currentAnalysis.dataCompleteness,
                         analysisTimestamp: currentAnalysis.analysisTimestamp,
@@ -6419,6 +6422,7 @@ struct QualityIndicatorRow: View {
             ),
             scanType: "food",
             foodNames: nil,
+            foodPortions: nil,
             suggestions: nil
         ),
         onNewSearch: {}

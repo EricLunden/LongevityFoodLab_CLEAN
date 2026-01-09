@@ -1153,32 +1153,34 @@ struct ContentView: View {
         productNameEn: String?,
         productName: String?
     ) -> String {
-        // Priority order: imported name > English name > product name
+        // Priority order: product_name (cleanest) > product_name_en > product_name_en_imported (fallback only)
         var nameToUse: String?
-        var isImportedName = false
         
-        if let imported = productNameEnImported, !imported.isEmpty {
-            nameToUse = imported
-            isImportedName = true
-        } else if let enName = productNameEn, !enName.isEmpty {
-            nameToUse = enName
-        } else if let name = productName, !name.isEmpty {
+        // First: Use product_name (cleanest, most accurate)
+        if let name = productName, !name.isEmpty {
             nameToUse = name
         }
-        
-        // Handle imported names specially - they often have format "Brand, product name"
-        if let name = nameToUse, isImportedName {
-            let parts = name.components(separatedBy: ",")
+        // Second: Use product_name_en if product_name is empty
+        else if let enName = productNameEn, !enName.isEmpty {
+            nameToUse = enName
+        }
+        // Last: Use product_name_en_imported only as fallback
+        else if let imported = productNameEnImported, !imported.isEmpty {
+            nameToUse = imported
+            // Handle imported names - they often have format "Brand, product name"
+            let parts = imported.components(separatedBy: ",")
             if parts.count > 1 {
                 // Combine all parts (brand + product name) and clean
                 let combined = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.joined(separator: " ")
                 nameToUse = removeDuplicateWords(from: combined)
             } else {
                 // Single part, just clean it
-                nameToUse = removeDuplicateWords(from: name)
+                nameToUse = removeDuplicateWords(from: imported)
             }
-        } else if let name = nameToUse {
-            // For non-imported names, clean normally
+        }
+        
+        // Clean the selected name
+        if let name = nameToUse {
             nameToUse = removeDuplicateWords(from: name)
         }
         
@@ -1231,50 +1233,102 @@ struct ContentView: View {
         return result.joined(separator: " ")
     }
     
-    /// Extract product name from front label image using OCR and update analysis if better name found
+    /// Extract product name from front label image using OCR and update analysis
+    /// Priority: Open Food Facts name (from barcode) > OCR name (from label image) > AI-generated name
     private func extractProductNameFromFrontLabel(image: UIImage) {
-        // Get brand from OpenFoodFacts if available (helps OCR identify product name)
-        let brand = currentOpenFoodFactsProduct?.brands
-        
-        ProductNameOCRService.shared.extractProductName(from: image, brand: brand) { ocrProductName in
-            guard let ocrName = ocrProductName, !ocrName.isEmpty else {
-                print("ContentView: OCR did not extract product name, keeping existing name")
-                return
-            }
+        Task { @MainActor in
+            guard let currentAnalysis = self.scanResultAnalysis else { return }
             
-            // Update analysis with OCR-extracted name if it's better
-            // Note: Using MainActor to ensure thread-safe access to @State properties
-            Task { @MainActor in
-                guard let currentAnalysis = self.scanResultAnalysis else { return }
-                // OCR name is better if it's longer/more descriptive than current name
-                let currentName = currentAnalysis.foodName
-                if ocrName.count > currentName.count || 
-                   (ocrName.lowercased().contains("total") && !currentName.lowercased().contains("total")) ||
-                   (ocrName.lowercased().contains("%") && !currentName.lowercased().contains("%")) {
-                    
-                print("ContentView: Updating product name from '\(currentName)' to OCR-extracted '\(ocrName)'")
+            // Check if we have Open Food Facts product name from barcode lookup
+            // If yes, trust OFF name (it's authoritative) and skip OCR
+            if let offProduct = currentOpenFoodFactsProduct,
+               let detectedBarcode = self.detectedBarcode,
+               !detectedBarcode.isEmpty {
                 
-                // Create updated analysis with OCR name
-                let updatedAnalysis = FoodAnalysis(
-                    foodName: ocrName,
-                    overallScore: currentAnalysis.overallScore,
-                    summary: currentAnalysis.summary,
-                    healthScores: currentAnalysis.healthScores,
-                    keyBenefits: currentAnalysis.keyBenefits ?? [],
-                    ingredients: currentAnalysis.ingredients ?? [],
-                    bestPreparation: currentAnalysis.bestPreparation ?? "",
-                    servingSize: currentAnalysis.servingSize,
-                    nutritionInfo: currentAnalysis.nutritionInfo,
-                    scanType: currentAnalysis.scanType,
-                    foodNames: currentAnalysis.foodNames,
-                    suggestions: currentAnalysis.suggestions
+                // Build OFF product name with brand prepended if needed
+                let offProductName = buildCleanProductNameForPrompt(
+                    brand: offProduct.brands,
+                    productNameEnImported: offProduct.productNameEnImported,
+                    productNameEn: offProduct.productNameEn,
+                    productName: offProduct.productName
                 )
                 
-                self.scanResultAnalysis = updatedAnalysis
-                self.scanResultBestPreparation = updatedAnalysis.bestPreparation
-            } else {
-                print("ContentView: OCR name '\(ocrName)' not better than current '\(currentName)', keeping current")
+                // Only use OFF name if it's valid (not empty or "Unknown Product")
+                if !offProductName.isEmpty && 
+                   offProductName.lowercased() != "unknown product" &&
+                   offProductName.lowercased() != currentAnalysis.foodName.lowercased() {
+                    
+                    print("ContentView: Using Open Food Facts product name '\(offProductName)' (barcode: \(detectedBarcode)), skipping OCR")
+                    
+                    // Update analysis with OFF name (which already has brand prepended)
+                    let updatedAnalysis = FoodAnalysis(
+                        foodName: offProductName,
+                        overallScore: currentAnalysis.overallScore,
+                        summary: currentAnalysis.summary,
+                        healthScores: currentAnalysis.healthScores,
+                        keyBenefits: currentAnalysis.keyBenefits ?? [],
+                        ingredients: currentAnalysis.ingredients ?? [],
+                        bestPreparation: currentAnalysis.bestPreparation ?? "",
+                        servingSize: currentAnalysis.servingSize,
+                        nutritionInfo: currentAnalysis.nutritionInfo,
+                        scanType: currentAnalysis.scanType,
+                        foodNames: currentAnalysis.foodNames,
+                        suggestions: currentAnalysis.suggestions
+                    )
+                    
+                    self.scanResultAnalysis = updatedAnalysis
+                    self.scanResultBestPreparation = updatedAnalysis.bestPreparation
+                    return // Skip OCR - we trust OFF name
+                }
             }
+            
+            // Fallback to OCR: Only use OCR when:
+            // - No barcode was scanned
+            // - OR Open Food Facts lookup failed
+            // - OR OFF returned empty/nil product name
+            print("ContentView: No valid OFF name available, using OCR to extract product name from front label")
+            
+            // Get brand from OpenFoodFacts if available (helps OCR identify product name)
+            let brand = currentOpenFoodFactsProduct?.brands
+            
+            ProductNameOCRService.shared.extractProductName(from: image, brand: brand) { ocrProductName in
+                guard let ocrName = ocrProductName, !ocrName.isEmpty else {
+                    print("ContentView: OCR did not extract product name, keeping existing name")
+                    return
+                }
+                
+                // Use OCR name as fallback when OFF name is not available
+                // Note: Using MainActor to ensure thread-safe access to @State properties
+                Task { @MainActor in
+                    guard let currentAnalysis = self.scanResultAnalysis else { return }
+                    let currentName = currentAnalysis.foodName
+                    
+                    // Only update if OCR name is different from current name
+                    if ocrName.lowercased().trimmingCharacters(in: .whitespaces) != currentName.lowercased().trimmingCharacters(in: .whitespaces) {
+                        print("ContentView: Updating product name from '\(currentName)' to OCR-extracted '\(ocrName)'")
+                        
+                        // Create updated analysis with OCR name
+                        let updatedAnalysis = FoodAnalysis(
+                            foodName: ocrName,
+                            overallScore: currentAnalysis.overallScore,
+                            summary: currentAnalysis.summary,
+                            healthScores: currentAnalysis.healthScores,
+                            keyBenefits: currentAnalysis.keyBenefits ?? [],
+                            ingredients: currentAnalysis.ingredients ?? [],
+                            bestPreparation: currentAnalysis.bestPreparation ?? "",
+                            servingSize: currentAnalysis.servingSize,
+                            nutritionInfo: currentAnalysis.nutritionInfo,
+                            scanType: currentAnalysis.scanType,
+                            foodNames: currentAnalysis.foodNames,
+                            suggestions: currentAnalysis.suggestions
+                        )
+                        
+                        self.scanResultAnalysis = updatedAnalysis
+                        self.scanResultBestPreparation = updatedAnalysis.bestPreparation
+                    } else {
+                        print("ContentView: OCR name '\(ocrName)' is identical to current name, keeping current")
+                    }
+                }
             }
         }
     }

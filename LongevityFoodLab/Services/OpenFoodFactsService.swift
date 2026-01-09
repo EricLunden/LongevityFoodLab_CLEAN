@@ -121,32 +121,34 @@ class OpenFoodFactsService {
         productName: String?,
         barcode: String?
     ) -> String {
-        // Priority order: imported name > English name > product name
+        // Priority order: product_name (cleanest) > product_name_en > product_name_en_imported (fallback only)
         var nameToUse: String?
-        var isImportedName = false
         
-        if let imported = productNameEnImported, !imported.isEmpty {
-            nameToUse = imported
-            isImportedName = true
-        } else if let enName = productNameEn, !enName.isEmpty {
-            nameToUse = enName
-        } else if let name = productName, !name.isEmpty {
+        // First: Use product_name (cleanest, most accurate)
+        if let name = productName, !name.isEmpty {
             nameToUse = name
         }
-        
-        // Handle imported names specially - they often have format "Brand, product name"
-        if let name = nameToUse, isImportedName {
-            let parts = name.components(separatedBy: ",")
+        // Second: Use product_name_en if product_name is empty
+        else if let enName = productNameEn, !enName.isEmpty {
+            nameToUse = enName
+        }
+        // Last: Use product_name_en_imported only as fallback
+        else if let imported = productNameEnImported, !imported.isEmpty {
+            nameToUse = imported
+            // Handle imported names - they often have format "Brand, product name"
+            let parts = imported.components(separatedBy: ",")
             if parts.count > 1 {
                 // Combine all parts (brand + product name) and clean
                 let combined = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.joined(separator: " ")
                 nameToUse = removeDuplicateWords(from: combined)
             } else {
                 // Single part, just clean it
-                nameToUse = removeDuplicateWords(from: name)
+                nameToUse = removeDuplicateWords(from: imported)
             }
-        } else if let name = nameToUse {
-            // For non-imported names, clean normally
+        }
+        
+        // Clean the selected name
+        if let name = nameToUse {
             nameToUse = removeDuplicateWords(from: name)
         }
         

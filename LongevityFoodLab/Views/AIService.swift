@@ -317,6 +317,55 @@ class AIService {
         return statusCode >= 500 && statusCode < 600 || statusCode == 429
     }
     
+    /// Sanitize JSON string by escaping unescaped control characters in string values
+    /// This fixes "Unescaped control character '0xa'" errors from JSONDecoder
+    private func sanitizeJSONString(_ jsonString: String) -> String {
+        var result = ""
+        var inString = false
+        var escapeNext = false
+        
+        for char in jsonString {
+            if escapeNext {
+                result.append(char)
+                escapeNext = false
+                continue
+            }
+            
+            if char == "\\" {
+                result.append(char)
+                escapeNext = true
+                continue
+            }
+            
+            if char == "\"" {
+                inString.toggle()
+                result.append(char)
+                continue
+            }
+            
+            if inString {
+                // Escape control characters within string values
+                switch char {
+                case "\n":
+                    result.append("\\n")
+                case "\r":
+                    result.append("\\r")
+                case "\t":
+                    result.append("\\t")
+                case "\u{0000}"..."\u{001F}": // Control characters
+                    let unicode = char.unicodeScalars.first?.value ?? 0
+                    result.append(String(format: "\\u%04x", unicode))
+                default:
+                    result.append(char)
+                }
+            } else {
+                result.append(char)
+            }
+        }
+        
+        return result
+    }
+    
     // Test function to verify API connectivity
     func testAPIConnection(completion: @escaping (Bool) -> Void) {
         print("AIService: Testing OpenAI API connection...")
@@ -772,7 +821,10 @@ class AIService {
             case .success(let text):
                 print("AIService: Received response for '\(foodName)'")
                 
-                guard let analysisData = text.data(using: .utf8) else {
+                // Sanitize JSON string to handle unescaped control characters
+                let sanitizedText = self.sanitizeJSONString(text)
+                
+                guard let analysisData = sanitizedText.data(using: .utf8) else {
                     print("AIService: Invalid text encoding for '\(foodName)'")
                     completion(.failure(NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)))
                     return
@@ -927,7 +979,10 @@ class AIService {
         makeOpenAIRequest(prompt: prompt) { result in
             switch result {
             case .success(let text):
-                guard let analysisData = text.data(using: .utf8), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                // Sanitize JSON string to handle unescaped control characters
+                let sanitizedText = self.sanitizeJSONString(text)
+                
+                guard let analysisData = sanitizedText.data(using: .utf8), !sanitizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     completion(.failure(NSError(domain: "No supplement data found. Please try a different name.", code: 0, userInfo: nil)))
                     return
                 }
@@ -1045,7 +1100,10 @@ class AIService {
         
         let text = try await makeOpenAIRequestAsync(prompt: prompt)
         
-        guard let dashboardData = text.data(using: .utf8) else {
+        // Sanitize JSON string to handle unescaped control characters
+        let sanitizedText = sanitizeJSONString(text)
+        
+        guard let dashboardData = sanitizedText.data(using: .utf8) else {
             throw NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)
         }
         
@@ -1096,7 +1154,10 @@ class AIService {
         
         let text = try await makeOpenAIRequestAsync(prompt: prompt)
         
-        guard let qualityData = text.data(using: .utf8) else {
+        // Sanitize JSON string to handle unescaped control characters
+        let sanitizedText = sanitizeJSONString(text)
+        
+        guard let qualityData = sanitizedText.data(using: .utf8) else {
             throw NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)
         }
         
@@ -1188,7 +1249,10 @@ class AIService {
         
         let text = try await makeOpenAIRequestAsync(prompt: prompt)
         
-        guard let petFoodData = text.data(using: .utf8) else {
+        // Sanitize JSON string to handle unescaped control characters
+        let sanitizedText = sanitizeJSONString(text)
+        
+        guard let petFoodData = sanitizedText.data(using: .utf8) else {
             throw NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)
         }
         
@@ -1284,7 +1348,10 @@ extension AIService {
         makeOpenAIRequest(prompt: prompt) { result in
             switch result {
             case .success(let text):
-                guard let textData = text.data(using: .utf8) else {
+                // Sanitize JSON string to handle unescaped control characters
+                let sanitizedText = self.sanitizeJSONString(text)
+                
+                guard let textData = sanitizedText.data(using: .utf8) else {
                     completion(.failure(NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)))
                     return
                 }
@@ -1370,7 +1437,10 @@ extension AIService {
         makeOpenAIRequest(prompt: prompt) { result in
             switch result {
             case .success(let text):
-                guard let textData = text.data(using: .utf8) else {
+                // Sanitize JSON string to handle unescaped control characters
+                let sanitizedText = self.sanitizeJSONString(text)
+                
+                guard let textData = sanitizedText.data(using: .utf8) else {
                     completion(.failure(NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)))
                     return
                 }
@@ -1470,7 +1540,10 @@ extension AIService {
         makeOpenAIRequest(prompt: prompt) { result in
             switch result {
             case .success(let text):
-                guard let textData = text.data(using: .utf8) else {
+                // Sanitize JSON string to handle unescaped control characters
+                let sanitizedText = self.sanitizeJSONString(text)
+                
+                guard let textData = sanitizedText.data(using: .utf8) else {
                     completion(.failure(NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)))
                     return
                 }

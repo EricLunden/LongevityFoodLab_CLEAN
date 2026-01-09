@@ -74,7 +74,8 @@ struct FoodAnalysis: Codable, Equatable {
             fat: "N/A",
             sugar: "N/A",
             fiber: "N/A",
-            sodium: "N/A"
+            sodium: "N/A",
+            saturatedFat: nil
         )
     }
     
@@ -584,6 +585,7 @@ struct NutritionInfo: Codable, Equatable {
     let sugar: String
     let fiber: String
     let sodium: String
+    let saturatedFat: String?
     // Micronutrients (optional for backward compatibility)
     let vitaminD: String?
     let vitaminE: String?
@@ -606,6 +608,7 @@ struct NutritionInfo: Codable, Equatable {
     let thiamin: String?
     
     init(calories: String, protein: String, carbohydrates: String, fat: String, sugar: String, fiber: String, sodium: String,
+         saturatedFat: String? = nil,
          vitaminD: String? = nil, vitaminE: String? = nil, potassium: String? = nil, vitaminK: String? = nil,
          magnesium: String? = nil, vitaminA: String? = nil, calcium: String? = nil, vitaminC: String? = nil,
          choline: String? = nil, iron: String? = nil, iodine: String? = nil, zinc: String? = nil,
@@ -618,6 +621,7 @@ struct NutritionInfo: Codable, Equatable {
         self.sugar = sugar
         self.fiber = fiber
         self.sodium = sodium
+        self.saturatedFat = saturatedFat
         self.vitaminD = vitaminD
         self.vitaminE = vitaminE
         self.potassium = potassium

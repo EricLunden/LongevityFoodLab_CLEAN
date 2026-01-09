@@ -376,7 +376,8 @@ class AIService {
                 fat: "Unavailable",
                 sugar: "Unavailable",
                 fiber: "Unavailable",
-                sodium: "Unavailable"
+                sodium: "Unavailable",
+                saturatedFat: nil
             ),
             scanType: nil,
             foodNames: nil,

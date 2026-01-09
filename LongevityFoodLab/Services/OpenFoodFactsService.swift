@@ -283,7 +283,8 @@ class OpenFoodFactsService {
                 fat: "N/A",
                 sugar: "N/A",
                 fiber: "N/A",
-                sodium: "N/A"
+                sodium: "N/A",
+                saturatedFat: nil
             )
         }
         
@@ -298,6 +299,9 @@ class OpenFoodFactsService {
         let sodiumMg = (nutriments.sodiumServing ?? nutriments.sodium100g ?? 0) * 1000
         let sodium = formatValue(sodiumMg, unit: "mg")
         
+        // Saturated fat
+        let saturatedFat = formatValue(nutriments.saturatedFatServing ?? nutriments.saturatedFat100g, unit: "g")
+        
         return NutritionInfo(
             calories: calories,
             protein: protein,
@@ -305,7 +309,8 @@ class OpenFoodFactsService {
             fat: fat,
             sugar: sugar,
             fiber: fiber,
-            sodium: sodium
+            sodium: sodium,
+            saturatedFat: saturatedFat.isEmpty ? nil : saturatedFat
         )
     }
     

@@ -1140,6 +1140,7 @@ class RecipeBrowserService: NSObject, ObservableObject {
                     sugar: formatNutritionValue(nutritionDict["sugar"], unit: "g"),
                     fiber: formatNutritionValue(nutritionDict["fiber"], unit: "g"),
                     sodium: formatNutritionValue(nutritionDict["sodium"], unit: "mg", isInteger: true),
+                    saturatedFat: formatNutritionValue(nutritionDict["saturated_fat"], unit: "g"),
                     vitaminD: formatNutritionValue(nutritionDict["vitamin_d"], unit: "mcg"),
                     vitaminE: formatNutritionValue(nutritionDict["vitamin_e"], unit: "mg"),
                     potassium: formatNutritionValue(nutritionDict["potassium"], unit: "mg", isInteger: true),

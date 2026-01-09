@@ -138,6 +138,7 @@ class NutritionService {
             sugar: nutritionDict["sugar"] ?? "0g",
             fiber: nutritionDict["fiber"] ?? "0g",
             sodium: nutritionDict["sodium"] ?? "0mg",
+            saturatedFat: nutritionDict["saturatedFat"],
             vitaminD: nutritionDict["vitaminD"],
             vitaminE: nutritionDict["vitaminE"],
             potassium: nutritionDict["potassium"],

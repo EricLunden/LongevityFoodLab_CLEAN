@@ -320,6 +320,8 @@ class USDAService: ObservableObject {
                 nutritionDict["sugar"] = amountValue
             } else if normalizedName.contains("sodium") {
                 nutritionDict["sodium"] = amountValue
+            } else if normalizedName.contains("saturated") && normalizedName.contains("fat") {
+                nutritionDict["saturatedFat"] = amountValue
             }
             
             // Micronutrients
@@ -419,6 +421,7 @@ class USDAService: ObservableObject {
             sugar: formatValue("sugar", defaultUnit: "g"),
             fiber: formatValue("fiber", defaultUnit: "g"),
             sodium: formatValue("sodium", defaultUnit: ""),
+            saturatedFat: nutritionDict["saturatedFat"] != nil ? formatValue("saturatedFat", defaultUnit: "g") : nil,
             vitaminD: nutritionDict["vitaminD"] != nil ? formatValue("vitaminD", defaultUnit: "mcg") : nil,
             vitaminE: nutritionDict["vitaminE"] != nil ? formatValue("vitaminE", defaultUnit: "mg") : nil,
             potassium: nutritionDict["potassium"] != nil ? formatValue("potassium", defaultUnit: "mg") : nil,

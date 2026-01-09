@@ -709,7 +709,8 @@ struct CompareHealthInfo: Codable {
                     fat: "0.3g",
                     sugar: "19g",
                     fiber: "4g",
-                    sodium: "2mg"
+                    sodium: "2mg",
+                    saturatedFat: nil
                 ),
                 scanType: "food",
                 foodNames: nil,
@@ -750,7 +751,8 @@ struct CompareHealthInfo: Codable {
                     fat: "0.4g",
                     sugar: "14g",
                     fiber: "3g",
-                    sodium: "1mg"
+                    sodium: "1mg",
+                    saturatedFat: nil
                 ),
                 scanType: "food",
                 foodNames: nil,

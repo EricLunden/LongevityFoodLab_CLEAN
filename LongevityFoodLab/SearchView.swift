@@ -1672,7 +1672,7 @@ struct SearchView: View {
     private func calculateNutritionFromDatabase() async throws -> NutritionInfo? {
         print("🔍 SearchView: Calculating nutrition for \(detectedFoods.count) detected foods")
         
-        var totalNutrition: [String: Double] = [:]
+        var aggregator = NutritionAggregator()
         var foundCount = 0
         var skippedCount = 0
         
@@ -1711,7 +1711,7 @@ struct SearchView: View {
             for try await (foodName, nutrition) in group {
                 if let nutrition = nutrition {
                     foundCount += 1
-                    addNutritionToTotals(nutrition, to: &totalNutrition)
+                    aggregator.add(nutrition)
                 }
             }
         }
@@ -1729,98 +1729,9 @@ struct SearchView: View {
             return nil
         }
         
-        // Create NutritionInfo from aggregated totals
-        let nutritionInfo = createNutritionInfoFromTotals(totalNutrition)
-        print("✅ SearchView: Aggregated nutrition - Calories: \(nutritionInfo.calories), Protein: \(nutritionInfo.protein)")
+        print("✅ SearchView: Aggregated nutrition - Calories: \(aggregator.getTotal(for: "calories")), Protein: \(aggregator.getTotal(for: "protein"))")
         
-        return nutritionInfo
-    }
-    
-    /// Add nutrition values to totals dictionary
-    private func addNutritionToTotals(_ nutrition: NutritionInfo, to totals: inout [String: Double]) {
-        func addNutrient(_ value: String?, key: String) {
-            guard let value = value, !value.isEmpty, value != "N/A" else { return }
-            if let amount = parseNutritionValueDouble(value) {
-                totals[key, default: 0] += amount
-            }
-        }
-        
-        // Macros
-        addNutrient(nutrition.calories, key: "calories")
-        addNutrient(nutrition.protein, key: "protein")
-        addNutrient(nutrition.carbohydrates, key: "carbohydrates")
-        addNutrient(nutrition.fat, key: "fat")
-        addNutrient(nutrition.sugar, key: "sugar")
-        addNutrient(nutrition.fiber, key: "fiber")
-        addNutrient(nutrition.sodium, key: "sodium")
-        
-        // Micronutrients
-        if let value = nutrition.vitaminD { addNutrient(value, key: "vitaminD") }
-        if let value = nutrition.vitaminE { addNutrient(value, key: "vitaminE") }
-        if let value = nutrition.potassium { addNutrient(value, key: "potassium") }
-        if let value = nutrition.vitaminK { addNutrient(value, key: "vitaminK") }
-        if let value = nutrition.magnesium { addNutrient(value, key: "magnesium") }
-        if let value = nutrition.vitaminA { addNutrient(value, key: "vitaminA") }
-        if let value = nutrition.calcium { addNutrient(value, key: "calcium") }
-        if let value = nutrition.vitaminC { addNutrient(value, key: "vitaminC") }
-        if let value = nutrition.choline { addNutrient(value, key: "choline") }
-        if let value = nutrition.iron { addNutrient(value, key: "iron") }
-        if let value = nutrition.zinc { addNutrient(value, key: "zinc") }
-        if let value = nutrition.folate { addNutrient(value, key: "folate") }
-        if let value = nutrition.vitaminB12 { addNutrient(value, key: "vitaminB12") }
-        if let value = nutrition.vitaminB6 { addNutrient(value, key: "vitaminB6") }
-        if let value = nutrition.selenium { addNutrient(value, key: "selenium") }
-        if let value = nutrition.copper { addNutrient(value, key: "copper") }
-        if let value = nutrition.manganese { addNutrient(value, key: "manganese") }
-        if let value = nutrition.thiamin { addNutrient(value, key: "thiamin") }
-    }
-    
-    /// Create NutritionInfo from totals dictionary
-    private func createNutritionInfoFromTotals(_ totals: [String: Double]) -> NutritionInfo {
-        func formatValue(_ key: String, unit: String = "g") -> String {
-            guard let value = totals[key], value > 0 else {
-                if key == "calories" {
-                    return "0"
-                }
-                return "0\(unit)"
-            }
-            if key == "calories" {
-                return "\(Int(round(value)))"
-            }
-            if key == "sodium" || key == "potassium" || key == "calcium" || key == "magnesium" || key == "iron" || key == "zinc" || key == "copper" || key == "manganese" || key == "thiamin" || key == "vitaminB6" || key == "choline" {
-                return "\(Int(round(value)))\(unit)"
-            }
-            return String(format: "%.1f\(unit)", value)
-        }
-        
-        return NutritionInfo(
-            calories: formatValue("calories", unit: ""),
-            protein: formatValue("protein"),
-            carbohydrates: formatValue("carbohydrates"),
-            fat: formatValue("fat"),
-            sugar: formatValue("sugar"),
-            fiber: formatValue("fiber"),
-            sodium: formatValue("sodium", unit: "mg"),
-            vitaminD: totals["vitaminD"] != nil && totals["vitaminD"]! > 0 ? formatValue("vitaminD", unit: "mcg") : nil,
-            vitaminE: totals["vitaminE"] != nil && totals["vitaminE"]! > 0 ? formatValue("vitaminE", unit: "mg") : nil,
-            potassium: totals["potassium"] != nil && totals["potassium"]! > 0 ? formatValue("potassium", unit: "mg") : nil,
-            vitaminK: totals["vitaminK"] != nil && totals["vitaminK"]! > 0 ? formatValue("vitaminK", unit: "mcg") : nil,
-            magnesium: totals["magnesium"] != nil && totals["magnesium"]! > 0 ? formatValue("magnesium", unit: "mg") : nil,
-            vitaminA: totals["vitaminA"] != nil && totals["vitaminA"]! > 0 ? formatValue("vitaminA", unit: "mcg") : nil,
-            calcium: totals["calcium"] != nil && totals["calcium"]! > 0 ? formatValue("calcium", unit: "mg") : nil,
-            vitaminC: totals["vitaminC"] != nil && totals["vitaminC"]! > 0 ? formatValue("vitaminC", unit: "mg") : nil,
-            choline: totals["choline"] != nil && totals["choline"]! > 0 ? formatValue("choline", unit: "mg") : nil,
-            iron: totals["iron"] != nil && totals["iron"]! > 0 ? formatValue("iron", unit: "mg") : nil,
-            iodine: totals["iodine"] != nil && totals["iodine"]! > 0 ? formatValue("iodine", unit: "mcg") : nil,
-            zinc: totals["zinc"] != nil && totals["zinc"]! > 0 ? formatValue("zinc", unit: "mg") : nil,
-            folate: totals["folate"] != nil && totals["folate"]! > 0 ? formatValue("folate", unit: "mcg") : nil,
-            vitaminB12: totals["vitaminB12"] != nil && totals["vitaminB12"]! > 0 ? formatValue("vitaminB12", unit: "mcg") : nil,
-            vitaminB6: totals["vitaminB6"] != nil && totals["vitaminB6"]! > 0 ? formatValue("vitaminB6", unit: "mg") : nil,
-            selenium: totals["selenium"] != nil && totals["selenium"]! > 0 ? formatValue("selenium", unit: "mcg") : nil,
-            copper: totals["copper"] != nil && totals["copper"]! > 0 ? formatValue("copper", unit: "mg") : nil,
-            manganese: totals["manganese"] != nil && totals["manganese"]! > 0 ? formatValue("manganese", unit: "mg") : nil,
-            thiamin: totals["thiamin"] != nil && totals["thiamin"]! > 0 ? formatValue("thiamin", unit: "mg") : nil
-        )
+        return aggregator.toNutritionInfo()
     }
     
     /// Parse nutrition value string to Double

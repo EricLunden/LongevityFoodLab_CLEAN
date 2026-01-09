@@ -1081,7 +1081,8 @@ struct RecipeDetailView: View {
             fat: "N/A",
             sugar: "N/A",
             fiber: "N/A",
-            sodium: "N/A"
+            sodium: "N/A",
+            saturatedFat: nil
         )
         
         return FoodAnalysis(

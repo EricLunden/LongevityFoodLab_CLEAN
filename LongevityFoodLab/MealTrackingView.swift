@@ -3677,12 +3677,7 @@ struct MealTrackingView: View {
     
     // MARK: - Calculate Total Macros from Today's Meals
     private var totalMacros: (protein: Double, carbs: Double, fat: Double, saturatedFat: Double, fiber: Double, sugar: Double) {
-        var totalProtein: Double = 0
-        var totalCarbs: Double = 0
-        var totalFat: Double = 0
-        let totalSaturatedFat: Double = 0
-        var totalFiber: Double = 0
-        var totalSugar: Double = 0
+        var aggregator = NutritionAggregator()
         
         print("🔍 MealTrackingView: Calculating macros for \(filteredTodayMeals.count) meals")
         
@@ -3716,26 +3711,25 @@ struct MealTrackingView: View {
             
             if let analysis = analysis,
                let nutrition = analysis.nutritionInfo {
-                // Parse string values to doubles
+                aggregator.add(nutrition)
+                
                 let protein = parseNutritionValue(nutrition.protein)
                 let carbs = parseNutritionValue(nutrition.carbohydrates)
                 let fat = parseNutritionValue(nutrition.fat)
-                let fiber = parseNutritionValue(nutrition.fiber)
-                let sugar = parseNutritionValue(nutrition.sugar)
-                
-                totalProtein += protein
-                totalCarbs += carbs
-                totalFat += fat
-                totalFiber += fiber
-                totalSugar += sugar
-                
                 print("🔍 MealTrackingView: Macros for \(meal.name) - Protein: \(protein)g, Carbs: \(carbs)g, Fat: \(fat)g")
             } else {
                 print("⚠️ MealTrackingView: Macros - No nutrition info found for meal \(meal.name)")
             }
         }
         
-        print("🔍 MealTrackingView: Total macros - Protein: \(totalProtein)g, Carbs: \(totalCarbs)g, Fat: \(totalFat)g, Fiber: \(totalFiber)g, Sugar: \(totalSugar)g")
+        let totalProtein = aggregator.getTotal(for: "protein")
+        let totalCarbs = aggregator.getTotal(for: "carbohydrates")
+        let totalFat = aggregator.getTotal(for: "fat")
+        let totalSaturatedFat = aggregator.getSaturatedFat()
+        let totalFiber = aggregator.getTotal(for: "fiber")
+        let totalSugar = aggregator.getTotal(for: "sugar")
+        
+        print("🔍 MealTrackingView: Total macros - Protein: \(totalProtein)g, Carbs: \(totalCarbs)g, Fat: \(totalFat)g, SaturatedFat: \(totalSaturatedFat)g, Fiber: \(totalFiber)g, Sugar: \(totalSugar)g")
         
         return (totalProtein, totalCarbs, totalFat, totalSaturatedFat, totalFiber, totalSugar)
     }

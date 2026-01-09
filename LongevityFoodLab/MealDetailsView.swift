@@ -1559,7 +1559,8 @@ struct MealDetailsView: View {
                         fat: "N/A",
                         sugar: "N/A",
                         fiber: "N/A",
-                        sodium: "N/A"
+                        sodium: "N/A",
+                        saturatedFat: nil
                     )
                     isLoadingNutritionInfo = false
                     print("⚠️ MealDetailsView: Using fallback N/A values")
@@ -1571,7 +1572,7 @@ struct MealDetailsView: View {
     /// Aggregate nutrition for a meal with multiple foods using tiered lookup (USDA -> Spoonacular -> AI)
     private func aggregateNutritionForMealWithTieredLookup(foodNames: [String]) async throws -> NutritionInfo? {
         print("🔍 MealDetailsView: Aggregating nutrition for meal with \(foodNames.count) ingredients using tiered lookup")
-        var totalNutrition: [String: Double] = [:]
+        var aggregator = NutritionAggregator()
         var foundAny = false
         
         // Use TaskGroup for parallel lookups
@@ -1609,7 +1610,7 @@ struct MealDetailsView: View {
                 if let nutrition = nutrition {
                     foundAny = true
                     print("✅ MealDetailsView: Found nutrition for '\(foodName)'")
-                    addNutritionToTotals(nutrition, to: &totalNutrition)
+                    aggregator.add(nutrition)
                 }
             }
         }
@@ -1619,130 +1620,9 @@ struct MealDetailsView: View {
             return nil
         }
         
-        // Convert totals to NutritionInfo
-        return createNutritionInfoFromTotals(totalNutrition)
+        return aggregator.toNutritionInfo()
     }
     
-    /// Add nutrition values to totals dictionary
-    private func addNutritionToTotals(_ nutrition: NutritionInfo, to totals: inout [String: Double]) {
-        // Macros
-        if let calories = parseNutritionValueDouble(nutrition.calories) {
-            totals["calories", default: 0] += calories
-        }
-        if let protein = parseNutritionValueDouble(nutrition.protein) {
-            totals["protein", default: 0] += protein
-        }
-        if let carbs = parseNutritionValueDouble(nutrition.carbohydrates) {
-            totals["carbohydrates", default: 0] += carbs
-        }
-        if let fat = parseNutritionValueDouble(nutrition.fat) {
-            totals["fat", default: 0] += fat
-        }
-        if let fiber = parseNutritionValueDouble(nutrition.fiber) {
-            totals["fiber", default: 0] += fiber
-        }
-        if let sugar = parseNutritionValueDouble(nutrition.sugar) {
-            totals["sugar", default: 0] += sugar
-        }
-        if let sodium = parseNutritionValueDouble(nutrition.sodium) {
-            totals["sodium", default: 0] += sodium
-        }
-        
-        // Micronutrients
-        if let vitaminD = parseNutritionValueDouble(nutrition.vitaminD) {
-            totals["vitaminD", default: 0] += vitaminD
-        }
-        if let vitaminE = parseNutritionValueDouble(nutrition.vitaminE) {
-            totals["vitaminE", default: 0] += vitaminE
-        }
-        if let potassium = parseNutritionValueDouble(nutrition.potassium) {
-            totals["potassium", default: 0] += potassium
-        }
-        if let vitaminK = parseNutritionValueDouble(nutrition.vitaminK) {
-            totals["vitaminK", default: 0] += vitaminK
-        }
-        if let magnesium = parseNutritionValueDouble(nutrition.magnesium) {
-            totals["magnesium", default: 0] += magnesium
-        }
-        if let vitaminA = parseNutritionValueDouble(nutrition.vitaminA) {
-            totals["vitaminA", default: 0] += vitaminA
-        }
-        if let calcium = parseNutritionValueDouble(nutrition.calcium) {
-            totals["calcium", default: 0] += calcium
-        }
-        if let vitaminC = parseNutritionValueDouble(nutrition.vitaminC) {
-            totals["vitaminC", default: 0] += vitaminC
-        }
-        if let choline = parseNutritionValueDouble(nutrition.choline) {
-            totals["choline", default: 0] += choline
-        }
-        if let iron = parseNutritionValueDouble(nutrition.iron) {
-            totals["iron", default: 0] += iron
-        }
-        if let zinc = parseNutritionValueDouble(nutrition.zinc) {
-            totals["zinc", default: 0] += zinc
-        }
-        if let folate = parseNutritionValueDouble(nutrition.folate) {
-            totals["folate", default: 0] += folate
-        }
-        if let vitaminB12 = parseNutritionValueDouble(nutrition.vitaminB12) {
-            totals["vitaminB12", default: 0] += vitaminB12
-        }
-        if let vitaminB6 = parseNutritionValueDouble(nutrition.vitaminB6) {
-            totals["vitaminB6", default: 0] += vitaminB6
-        }
-        if let selenium = parseNutritionValueDouble(nutrition.selenium) {
-            totals["selenium", default: 0] += selenium
-        }
-        if let copper = parseNutritionValueDouble(nutrition.copper) {
-            totals["copper", default: 0] += copper
-        }
-        if let manganese = parseNutritionValueDouble(nutrition.manganese) {
-            totals["manganese", default: 0] += manganese
-        }
-        if let thiamin = parseNutritionValueDouble(nutrition.thiamin) {
-            totals["thiamin", default: 0] += thiamin
-        }
-    }
-    
-    /// Create NutritionInfo from totals dictionary
-    private func createNutritionInfoFromTotals(_ totals: [String: Double]) -> NutritionInfo {
-        func formatValue(_ key: String, unit: String = "g") -> String {
-            guard let value = totals[key], value > 0 else { return "0\(unit)" }
-            if key == "calories" || key == "sodium" {
-                return "\(Int(round(value)))\(unit == "g" ? "" : unit)"
-            }
-            return String(format: "%.1f\(unit)", value)
-        }
-        
-        return NutritionInfo(
-            calories: formatValue("calories", unit: ""),
-            protein: formatValue("protein"),
-            carbohydrates: formatValue("carbohydrates"),
-            fat: formatValue("fat"),
-            sugar: formatValue("sugar"),
-            fiber: formatValue("fiber"),
-            sodium: formatValue("sodium", unit: "mg"),
-            vitaminD: formatValue("vitaminD", unit: "mcg"),
-            vitaminE: formatValue("vitaminE", unit: "mg"),
-            potassium: formatValue("potassium", unit: "mg"),
-            vitaminK: formatValue("vitaminK", unit: "mcg"),
-            magnesium: formatValue("magnesium", unit: "mg"),
-            vitaminA: formatValue("vitaminA", unit: "mcg"),
-            calcium: formatValue("calcium", unit: "mg"),
-            vitaminC: formatValue("vitaminC", unit: "mg"),
-            choline: formatValue("choline", unit: "mg"),
-            iron: formatValue("iron", unit: "mg"),
-            zinc: formatValue("zinc", unit: "mg"),
-            folate: formatValue("folate", unit: "mcg"),
-            vitaminB12: formatValue("vitaminB12", unit: "mcg"),
-            vitaminB6: formatValue("vitaminB6", unit: "mg"),
-            selenium: formatValue("selenium", unit: "mcg"),
-            copper: formatValue("copper", unit: "mg"),
-            manganese: formatValue("manganese", unit: "mg"),
-            thiamin: formatValue("thiamin", unit: "mg")
-        )
-    }
     
     private func updateCachedAnalysisWithNutrition(_ nutrition: NutritionInfo) {
         guard let analysis = cachedAnalysis else {

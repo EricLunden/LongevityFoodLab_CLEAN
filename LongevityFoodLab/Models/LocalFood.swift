@@ -124,6 +124,7 @@ struct LocalNutrition {
             sugar: formatValue(sugar, unit: "g"),
             fiber: formatValue(fiber, unit: "g"),
             sodium: formatValue(sodium, unit: "mg", isInteger: true),
+            saturatedFat: saturatedFat != nil && saturatedFat! > 0 ? formatValue(saturatedFat, unit: "g") : nil,
             vitaminD: formatValue(vitaminD, unit: "mcg"),
             vitaminE: formatValue(vitaminE, unit: "mg"),
             potassium: formatValue(potassium, unit: "mg", isInteger: true),

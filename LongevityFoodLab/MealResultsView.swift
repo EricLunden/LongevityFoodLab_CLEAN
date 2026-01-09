@@ -362,7 +362,8 @@ struct FoodAnalysisCard: View {
                     fat: "3g",
                     sugar: "5g",
                     fiber: "4g",
-                    sodium: "200mg"
+                    sodium: "200mg",
+                    saturatedFat: nil
                 ),
                 scanType: "meal",
                 foodNames: nil,

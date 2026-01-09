@@ -705,9 +705,6 @@ struct MealDetailsView: View {
                 if let iron = nutrition.iron, !iron.isEmpty {
                     nutritionRow("Iron", iron)
                 }
-                if let iodine = nutrition.iodine, !iodine.isEmpty {
-                    nutritionRow("Iodine", iodine)
-                }
                 if let zinc = nutrition.zinc, !zinc.isEmpty {
                     nutritionRow("Zinc", zinc)
                 }
@@ -1682,9 +1679,6 @@ struct MealDetailsView: View {
         if let iron = parseNutritionValueDouble(nutrition.iron) {
             totals["iron", default: 0] += iron
         }
-        if let iodine = parseNutritionValueDouble(nutrition.iodine) {
-            totals["iodine", default: 0] += iodine
-        }
         if let zinc = parseNutritionValueDouble(nutrition.zinc) {
             totals["zinc", default: 0] += zinc
         }
@@ -1739,7 +1733,6 @@ struct MealDetailsView: View {
             vitaminC: formatValue("vitaminC", unit: "mg"),
             choline: formatValue("choline", unit: "mg"),
             iron: formatValue("iron", unit: "mg"),
-            iodine: formatValue("iodine", unit: "mcg"),
             zinc: formatValue("zinc", unit: "mg"),
             folate: formatValue("folate", unit: "mcg"),
             vitaminB12: formatValue("vitaminB12", unit: "mcg"),
@@ -2442,7 +2435,6 @@ struct MealDetailsView: View {
         case "Vitamin C": return parseNutritionValueDouble(nutrition.vitaminC)
         case "Choline": return parseNutritionValueDouble(nutrition.choline)
         case "Iron": return parseNutritionValueDouble(nutrition.iron)
-        case "Iodine": return parseNutritionValueDouble(nutrition.iodine)
         case "Zinc": return parseNutritionValueDouble(nutrition.zinc)
         case "Folate (B9)": return parseNutritionValueDouble(nutrition.folate)
         case "Vitamin B12": return parseNutritionValueDouble(nutrition.vitaminB12)
@@ -2632,8 +2624,6 @@ struct MealDetailsView: View {
             return "For brain, memory, liver"
         case "Iron":
             return "For energy, blood, oxygen"
-        case "Iodine":
-            return "For thyroid, metabolism, growth"
         case "Zinc":
             return "For immunity, healing, growth"
         case "Folate (B9)":
@@ -2678,8 +2668,6 @@ struct MealDetailsView: View {
             return ("brain.head.profile", LinearGradient(colors: [Color.blue, Color(red: 0.0, green: 0.478, blue: 1.0)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Iron":
             return ("drop.fill", LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.2, blue: 0.2)], startPoint: .leading, endPoint: .trailing), "mg")
-        case "Iodine":
-            return ("waveform", LinearGradient(colors: [Color(red: 0.255, green: 0.643, blue: 0.655), Color(red: 0.0, green: 0.8, blue: 0.8)], startPoint: .leading, endPoint: .trailing), "mcg")
         case "Zinc":
             return ("shield.fill", LinearGradient(colors: [Color(red: 0.42, green: 0.557, blue: 0.498), Color(red: 0.3, green: 0.7, blue: 0.6)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Folate (B9)":

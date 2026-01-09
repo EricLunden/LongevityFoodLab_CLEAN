@@ -1950,12 +1950,6 @@ struct MealTrackingView: View {
                         foundAnyMicro = true
                         print("     - Iron: \(iron) = \(value)")
                     }
-                    if let iodine = nutrition.iodine, !iodine.isEmpty {
-                        let value = parseNutritionValue(iodine)
-                        totals["Iodine", default: 0] += value
-                        foundAnyMicro = true
-                        print("     - Iodine: \(iodine) = \(value)")
-                    }
                     if let zinc = nutrition.zinc, !zinc.isEmpty {
                         let value = parseNutritionValue(zinc)
                         totals["Zinc", default: 0] += value
@@ -2050,8 +2044,6 @@ struct MealTrackingView: View {
             return ("brain.head.profile", LinearGradient(colors: [Color.blue, Color(red: 0.0, green: 0.478, blue: 1.0)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Iron":
             return ("drop.fill", LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.2, blue: 0.2)], startPoint: .leading, endPoint: .trailing), "mg")
-        case "Iodine":
-            return ("waveform", LinearGradient(colors: [Color(red: 0.255, green: 0.643, blue: 0.655), Color(red: 0.0, green: 0.8, blue: 0.8)], startPoint: .leading, endPoint: .trailing), "mcg")
         case "Zinc":
             return ("shield.fill", LinearGradient(colors: [Color(red: 0.42, green: 0.557, blue: 0.498), Color(red: 0.3, green: 0.7, blue: 0.6)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Folate (B9)":
@@ -2219,8 +2211,6 @@ struct MealTrackingView: View {
             return "For brain, memory, liver"
         case "Iron":
             return "For energy, blood, oxygen"
-        case "Iodine":
-            return "For thyroid, metabolism, growth"
         case "Zinc":
             return "For immunity, healing, growth"
         case "Folate (B9)":

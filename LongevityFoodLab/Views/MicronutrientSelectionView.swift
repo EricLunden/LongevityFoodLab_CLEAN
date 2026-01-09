@@ -16,7 +16,7 @@ struct MicronutrientSelectionView: View {
     private let allMicronutrients = [
         "Vitamin D", "Vitamin E", "Potassium", "Vitamin K", "Magnesium",
         "Vitamin A", "Calcium", "Vitamin C", "Choline", "Iron",
-        "Iodine", "Zinc", "Folate (B9)", "Vitamin B12", "Vitamin B6",
+        "Zinc", "Folate (B9)", "Vitamin B12", "Vitamin B6",
         "Selenium", "Copper", "Manganese", "Thiamin (B1)"
     ]
     
@@ -120,8 +120,6 @@ struct MicronutrientSelectionView: View {
             return "For brain, memory, liver"
         case "Iron":
             return "For energy, blood, oxygen"
-        case "Iodine":
-            return "For thyroid, metabolism, growth"
         case "Zinc":
             return "For immunity, healing, growth"
         case "Folate (B9)":

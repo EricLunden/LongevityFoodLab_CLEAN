@@ -1765,7 +1765,6 @@ struct SearchView: View {
         if let value = nutrition.vitaminC { addNutrient(value, key: "vitaminC") }
         if let value = nutrition.choline { addNutrient(value, key: "choline") }
         if let value = nutrition.iron { addNutrient(value, key: "iron") }
-        if let value = nutrition.iodine { addNutrient(value, key: "iodine") }
         if let value = nutrition.zinc { addNutrient(value, key: "zinc") }
         if let value = nutrition.folate { addNutrient(value, key: "folate") }
         if let value = nutrition.vitaminB12 { addNutrient(value, key: "vitaminB12") }
@@ -2176,9 +2175,6 @@ struct SearchView: View {
                 if let iron = nutrition.iron, !iron.isEmpty {
                     totals["Iron", default: 0] += quickDashboardParseNutritionValue(iron)
                 }
-                if let iodine = nutrition.iodine, !iodine.isEmpty {
-                    totals["Iodine", default: 0] += quickDashboardParseNutritionValue(iodine)
-                }
                 if let zinc = nutrition.zinc, !zinc.isEmpty {
                     totals["Zinc", default: 0] += quickDashboardParseNutritionValue(zinc)
                 }
@@ -2292,8 +2288,6 @@ struct SearchView: View {
             return "For brain, memory, liver"
         case "Iron":
             return "For energy, blood, oxygen"
-        case "Iodine":
-            return "For thyroid, metabolism, growth"
         case "Zinc":
             return "For immunity, healing, growth"
         case "Folate (B9)":
@@ -2337,8 +2331,6 @@ struct SearchView: View {
             return ("brain.head.profile", LinearGradient(colors: [Color.blue, Color(red: 0.0, green: 0.478, blue: 1.0)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Iron":
             return ("drop.fill", LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.2, blue: 0.2)], startPoint: .leading, endPoint: .trailing), "mg")
-        case "Iodine":
-            return ("waveform", LinearGradient(colors: [Color(red: 0.255, green: 0.643, blue: 0.655), Color(red: 0.0, green: 0.8, blue: 0.8)], startPoint: .leading, endPoint: .trailing), "mcg")
         case "Zinc":
             return ("shield.fill", LinearGradient(colors: [Color(red: 0.42, green: 0.557, blue: 0.498), Color(red: 0.3, green: 0.7, blue: 0.6)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Folate (B9)":
@@ -2361,7 +2353,7 @@ struct SearchView: View {
     }
     
     private var quickDashboardAvailableMicronutrients: [String] {
-        return ["Calcium", "Choline", "Copper", "Folate (B9)", "Iodine", "Iron", "Magnesium", "Manganese", "Potassium", "Selenium", "Thiamin (B1)", "Vitamin A", "Vitamin B12", "Vitamin B6", "Vitamin C", "Vitamin D", "Vitamin E", "Vitamin K", "Zinc"]
+        return ["Calcium", "Choline", "Copper", "Folate (B9)", "Iron", "Magnesium", "Manganese", "Potassium", "Selenium", "Thiamin (B1)", "Vitamin A", "Vitamin B12", "Vitamin B6", "Vitamin C", "Vitamin D", "Vitamin E", "Vitamin K", "Zinc"]
     }
     
     private func loadQuickDashboardSelectedMicronutrients() {

@@ -536,7 +536,7 @@ struct MicronutrientsStepView: View {
     private let micronutrientOptions = [
         "Vitamin D", "Vitamin E", "Potassium", "Vitamin K", "Magnesium",
         "Vitamin A", "Calcium", "Vitamin C", "Choline", "Iron",
-        "Iodine", "Zinc", "Folate (B9)", "Vitamin B12", "Vitamin B6",
+        "Zinc", "Folate (B9)", "Vitamin B12", "Vitamin B6",
         "Selenium", "Copper", "Manganese", "Thiamin (B1)"
     ]
     

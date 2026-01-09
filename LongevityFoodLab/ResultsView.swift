@@ -1400,13 +1400,6 @@ struct ResultsView: View {
                         .background(colorScheme == .dark ? Color.white.opacity(0.4) : Color.gray.opacity(0.5))
                 }
             }
-            if let iodine = nutrition.iodine, !iodine.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    nutritionRow("Iodine", iodine)
-                    Divider()
-                        .background(colorScheme == .dark ? Color.white.opacity(0.4) : Color.gray.opacity(0.5))
-                }
-            }
             if let zinc = nutrition.zinc, !zinc.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     nutritionRow("Zinc", zinc)
@@ -2142,8 +2135,8 @@ struct ResultsView: View {
         )
         
         print("✅ ResultsView: Conversion complete - Macros: \(result.calories) cal, \(result.protein) protein")
-        let microCount = [result.vitaminD, result.vitaminE, result.potassium, result.vitaminK, result.magnesium, result.vitaminA, result.calcium, result.vitaminC, result.choline, result.iron, result.iodine, result.zinc, result.folate, result.vitaminB12, result.vitaminB6, result.selenium, result.copper, result.manganese, result.thiamin].compactMap { $0 }.count
-        print("📊 ResultsView: Micros found: \(microCount)/19")
+        let microCount = [result.vitaminD, result.vitaminE, result.potassium, result.vitaminK, result.magnesium, result.vitaminA, result.calcium, result.vitaminC, result.choline, result.iron, result.zinc, result.folate, result.vitaminB12, result.vitaminB6, result.selenium, result.copper, result.manganese, result.thiamin].compactMap { $0 }.count
+        print("📊 ResultsView: Micros found: \(microCount)/18")
         
         return result
     }
@@ -2182,7 +2175,6 @@ struct ResultsView: View {
         if let value = nutrition.vitaminC { addNutrient(value, key: "vitaminC") }
         if let value = nutrition.choline { addNutrient(value, key: "choline") }
         if let value = nutrition.iron { addNutrient(value, key: "iron") }
-        if let value = nutrition.iodine { addNutrient(value, key: "iodine") }
         if let value = nutrition.zinc { addNutrient(value, key: "zinc") }
         if let value = nutrition.folate { addNutrient(value, key: "folate") }
         if let value = nutrition.vitaminB12 { addNutrient(value, key: "vitaminB12") }
@@ -2528,7 +2520,6 @@ struct ResultsView: View {
                 "vitaminC": "XXX mg",
                 "choline": "XXX mg",
                 "iron": "XX mg",
-                "iodine": "XXX mcg",
                 "zinc": "XX mg",
                 "folate": "XXX mcg",
                 "vitaminB12": "X.X mcg",
@@ -3155,7 +3146,6 @@ struct ResultsView: View {
         case "Vitamin C": return parseNutritionValueDouble(nutrition.vitaminC)
         case "Choline": return parseNutritionValueDouble(nutrition.choline)
         case "Iron": return parseNutritionValueDouble(nutrition.iron)
-        case "Iodine": return parseNutritionValueDouble(nutrition.iodine)
         case "Zinc": return parseNutritionValueDouble(nutrition.zinc)
         case "Folate (B9)": return parseNutritionValueDouble(nutrition.folate)
         case "Vitamin B12": return parseNutritionValueDouble(nutrition.vitaminB12)
@@ -3345,8 +3335,6 @@ struct ResultsView: View {
             return "For brain, memory, liver"
         case "Iron":
             return "For energy, blood, oxygen"
-        case "Iodine":
-            return "For thyroid, metabolism, growth"
         case "Zinc":
             return "For immunity, healing, growth"
         case "Folate (B9)":
@@ -3391,8 +3379,6 @@ struct ResultsView: View {
             return ("brain.head.profile", LinearGradient(colors: [Color.blue, Color(red: 0.0, green: 0.478, blue: 1.0)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Iron":
             return ("drop.fill", LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.2, blue: 0.2)], startPoint: .leading, endPoint: .trailing), "mg")
-        case "Iodine":
-            return ("waveform", LinearGradient(colors: [Color(red: 0.255, green: 0.643, blue: 0.655), Color(red: 0.0, green: 0.8, blue: 0.8)], startPoint: .leading, endPoint: .trailing), "mcg")
         case "Zinc":
             return ("shield.fill", LinearGradient(colors: [Color(red: 0.42, green: 0.557, blue: 0.498), Color(red: 0.3, green: 0.7, blue: 0.6)], startPoint: .leading, endPoint: .trailing), "mg")
         case "Folate (B9)":

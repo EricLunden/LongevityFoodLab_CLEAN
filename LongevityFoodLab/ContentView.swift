@@ -172,6 +172,10 @@ struct ContentView: View {
             let _ = print("ContentView: Presenting ResultsView with foodAnalysis: \(foodAnalysis?.foodName ?? "nil")")
             let _ = print("ContentView: showingResults is \(showingResults)")
             if let analysis = foodAnalysis {
+                let _ = print("🔍 ContentView: Passing FoodAnalysis to ResultsView - nutritionInfo is \(analysis.nutritionInfo != nil ? "SET" : "NIL")")
+                if let nutrition = analysis.nutritionInfo {
+                    let _ = print("🔍 ContentView: nutrition calories = \(nutrition.calories), protein = \(nutrition.protein)")
+                }
                 ResultsView(
                     analysis: analysis, 
                     onNewSearch: {

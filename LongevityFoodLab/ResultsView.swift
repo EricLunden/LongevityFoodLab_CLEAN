@@ -129,6 +129,12 @@ struct ResultsView: View {
         self.isSupplement = isSupplement
         self.onMealAdded = onMealAdded
         _currentAnalysis = State(initialValue: analysis)
+        
+        print("🔍 ResultsView init: analysis.nutritionInfo is \(analysis.nutritionInfo != nil ? "SET" : "NIL")")
+        if let nutrition = analysis.nutritionInfo {
+            print("🔍 ResultsView init: calories = \(nutrition.calories), protein = \(nutrition.protein)")
+            print("🔍 ResultsView init: foodNames = \(analysis.foodNames?.joined(separator: ", ") ?? "nil")")
+        }
     }
     
     // Check cache for fallback when analysis is unavailable
@@ -1895,15 +1901,30 @@ struct ResultsView: View {
             print("⚠️ ResultsView: In-memory nutrition exists but is unreasonable, re-fetching from USDA...")
         }
         
-        // Step 2: Check if current analysis has valid nutrition info
-        if let currentNutrition = currentAnalysis.nutritionInfo, 
-           isNutritionInfoValid(currentNutrition),
-           isNutritionReasonable(currentNutrition, isMeal: analysis.foodNames != nil && !analysis.foodNames!.isEmpty) {
-            print("ℹ️ ResultsView: Current analysis has valid nutrition info, using it")
-            loadedNutritionInfo = currentNutrition
-            return
-        } else if let currentNutrition = currentAnalysis.nutritionInfo, isNutritionInfoValid(currentNutrition) {
-            print("⚠️ ResultsView: Current analysis nutrition exists but is unreasonable, re-fetching from USDA...")
+        // Step 2: Check if current analysis has valid nutrition info (from SearchView calculation)
+        let isMeal = analysis.foodNames != nil && !analysis.foodNames!.isEmpty
+        if let currentNutrition = currentAnalysis.nutritionInfo {
+            print("🔍 ResultsView: Found nutrition in currentAnalysis.nutritionInfo")
+            print("🔍 ResultsView:   - Is meal: \(isMeal)")
+            print("🔍 ResultsView:   - Is valid: \(isNutritionInfoValid(currentNutrition))")
+            if isNutritionInfoValid(currentNutrition) {
+                let isReasonable = isNutritionReasonable(currentNutrition, isMeal: isMeal)
+                print("🔍 ResultsView:   - Is reasonable: \(isReasonable)")
+                if isReasonable {
+                    print("✅ ResultsView: Using nutrition from SearchView (currentAnalysis.nutritionInfo) - skipping API call")
+                    loadedNutritionInfo = currentNutrition
+                    return
+                } else {
+                    print("⚠️ ResultsView: Current analysis nutrition exists but failed reasonableness check, re-fetching...")
+                    if let calories = parseNutritionValueDouble(currentNutrition.calories) {
+                        print("⚠️ ResultsView:   - Calories: \(Int(round(calories)))")
+                    }
+                }
+            } else {
+                print("⚠️ ResultsView: Current analysis nutrition exists but is invalid, re-fetching...")
+            }
+        } else {
+            print("🔍 ResultsView: No nutrition in currentAnalysis.nutritionInfo (will check cache/API)")
         }
         
         // Step 3: Check persistent cache (FoodCacheManager) for cached nutrition info

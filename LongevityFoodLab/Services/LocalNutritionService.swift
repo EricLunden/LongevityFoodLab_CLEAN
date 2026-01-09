@@ -354,36 +354,303 @@ class LocalNutritionService {
     }
     
     private func calculateRelevanceScore(query: String, food: LocalFood) -> Int {
-        var score = food.popularityScore // Start with popularity
+        var score = food.popularityScore // Start with popularity (typically 0-100)
         
         let nameLower = food.name.lowercased()
         let descLower = food.description.lowercased()
+        let queryLower = query.lowercased()
+        let queryWords = queryLower.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        let combinedText = "\(nameLower) \(descLower)"
         
-        // Exact match on name: score 100
-        if nameLower == query {
+        // Detect if query is a simple, single-word food (like "apple", "banana", "salmon")
+        let isSimpleFood = queryWords.count == 1 && queryLower.count < 15
+        
+        // EXACT match gets highest score (1000 points)
+        if nameLower == queryLower {
+            score += 1000
+        }
+        // STARTS WITH the search term gets high score (500 points)
+        else if nameLower.hasPrefix(queryLower) {
+            score += 500
+        }
+        // Word boundary match (search term is a complete word) gets medium score (200 points)
+        else if nameLower.contains(" \(queryLower) ") || nameLower.hasSuffix(" \(queryLower)") || nameLower.hasPrefix("\(queryLower) ") {
+            score += 200
+        }
+        // CONTAINS match gets lowest score (100 points)
+        else if nameLower.contains(queryLower) {
             score += 100
         }
-        // Name starts with query: score 80
-        else if nameLower.hasPrefix(query) {
-            score += 80
-        }
-        // Name contains query as whole word: score 50
-        else if nameLower.contains(" \(query) ") || nameLower.hasSuffix(" \(query)") || nameLower.hasPrefix("\(query) ") {
-            score += 50
-        }
-        // Name contains query: score 30
-        else if nameLower.contains(query) {
-            score += 30
-        }
         
-        // Penalty for processed foods when searching for simple foods
-        let processedKeywords = ["pie", "cake", "cookie", "bread", "muffin", "pastry", "cooked", "prepared"]
-        if query.split(separator: " ").count <= 2 {
+        // For simple foods, heavily penalize complex/processed foods
+        if isSimpleFood {
+            // Penalty for complex foods (contains multiple ingredients separated by commas)
+            if nameLower.contains(",") || descLower.contains(",") {
+                score -= 200 // Heavy penalty for complex foods when searching simple
+            }
+            
+            // Penalty for processed foods (croissants, pie, cake, etc.)
+            let processedKeywords = ["croissant", "pie", "cake", "cookie", "bread", "muffin", "pastry", "doughnut", "donut", "cooked", "prepared", "canned", "frozen"]
             for keyword in processedKeywords {
-                if descLower.contains(keyword) && !descLower.hasPrefix(keyword) {
-                    score -= 50
+                if combinedText.contains(keyword) && !combinedText.hasPrefix(keyword) {
+                    score -= 300 // Very heavy penalty - processed food when searching for simple food
                 }
             }
+        }
+        
+        // Check if query words appear in description/name
+        for word in queryWords {
+            if combinedText.contains(word) {
+                score += 50
+                
+                // Bonus if word appears at the start (main ingredient)
+                if nameLower.hasPrefix(word) || nameLower.hasPrefix("\(word) ") {
+                    score += 50
+                }
+                
+                // Penalty if word appears after a comma (likely a modifier)
+                if let commaIndex = nameLower.firstIndex(of: ","),
+                   nameLower[commaIndex...].contains(word) {
+                    score -= 30
+                }
+            }
+        }
+        
+        // Penalty for results that contain the query but as a modifier
+        // e.g., "salt" should not match "Butter, salted"
+        let queryIsModifier = nameLower.contains(", \(queryLower)") || 
+                              nameLower.contains(" \(queryLower),") ||
+                              descLower.contains(", \(queryLower)") ||
+                              descLower.contains(" \(queryLower),")
+        if queryIsModifier && !nameLower.hasPrefix(queryLower) {
+            score -= 50
+        }
+        
+        // Specific negative scoring for misleading matches
+        // If searching for "steak" and result contains "fries" or "fry" → reduce score by 300
+        if queryLower.contains("steak") && (combinedText.contains("fries") || combinedText.contains("fry")) {
+            score -= 300
+        }
+        
+        // If searching for "lettuce" and result contains "taco" or "burger" → reduce score by 300
+        if queryLower.contains("lettuce") && (combinedText.contains("taco") || combinedText.contains("burger")) {
+            score -= 300
+        }
+        
+        // If searching for "tomato" and result contains "juice" or "sauce" or "dressing" → reduce score by 300
+        if queryLower.contains("tomato") && (combinedText.contains("juice") || combinedText.contains("sauce") || combinedText.contains("dressing")) {
+            score -= 300
+        }
+        
+        // If searching for "carrot" and result contains "cake" or "canned" → reduce score by 200
+        if queryLower.contains("carrot") && (combinedText.contains("cake") || combinedText.contains("canned")) {
+            score -= 200
+        }
+        
+        // VEGETABLE-SPECIFIC SCORING: Prefer fresh/raw over processed versions
+        // This handles common vegetables that have many processed variants
+        
+        // Tomato/tomatoes: penalize processed forms, boost raw
+        if queryLower.contains("tomato") {
+            let processedPenalties = ["sun-dried", "sun dried", "juice", "sauce", "paste", "ketchup", "canned", "stewed"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400 // Heavy penalty for processed tomatoes
+                }
+            }
+            // Boost raw/ripe tomatoes
+            if combinedText.contains("raw") || combinedText.contains("ripe") || combinedText.contains("fresh") {
+                score += 200 // Bonus for fresh tomatoes
+            }
+        }
+        
+        // Pepper/peppers: penalize processed, boost raw
+        if queryLower.contains("pepper") && !queryLower.contains("black") && !queryLower.contains("white") {
+            let processedPenalties = ["pickled", "sauce", "dried", "roasted", "canned"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Mushroom/mushrooms: penalize processed, boost raw
+        if queryLower.contains("mushroom") {
+            let processedPenalties = ["canned", "dried", "soup", "sauce"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Spinach: penalize processed, boost raw (cooked is acceptable, lighter penalty)
+        if queryLower.contains("spinach") {
+            let heavyPenalties = ["canned", "creamed", "frozen"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Corn: penalize processed, boost raw/sweet corn (cooked is acceptable, lighter penalty)
+        if queryLower.contains("corn") && !queryLower.contains("cornmeal") {
+            let heavyPenalties = ["syrup", "chips", "bread", "oil", "canned", "cream"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") || combinedText.contains("sweet corn") {
+                score += 200
+            }
+        }
+        
+        // Beans/green beans: penalize processed, boost raw/fresh (cooked is acceptable, lighter penalty)
+        if queryLower.contains("bean") && (queryLower.contains("green") || queryLower == "beans" || queryLower == "bean") {
+            let heavyPenalties = ["baked", "refried", "chili", "canned"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") || combinedText.contains("green bean") {
+                score += 200
+            }
+        }
+        
+        // Peas: penalize processed, boost raw/fresh (cooked is acceptable, lighter penalty)
+        if queryLower.contains("pea") && !queryLower.contains("peanut") {
+            let heavyPenalties = ["soup", "split", "canned", "frozen"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Onion/onions: penalize processed, boost raw
+        if queryLower.contains("onion") {
+            let processedPenalties = ["rings", "fried", "powder", "flakes", "canned", "pickled"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Cucumber: penalize processed, boost raw
+        if queryLower.contains("cucumber") {
+            let processedPenalties = ["pickled", "pickle"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Celery: penalize processed, boost raw
+        if queryLower.contains("celery") {
+            let processedPenalties = ["soup", "salt", "flakes", "powder"]
+            for penalty in processedPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Asparagus: penalize processed, boost raw (cooked is acceptable, lighter penalty)
+        if queryLower.contains("asparagus") {
+            let heavyPenalties = ["canned", "soup"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // Zucchini/squash: penalize processed, boost raw (cooked is acceptable, lighter penalty)
+        if queryLower.contains("zucchini") || queryLower.contains("squash") {
+            let heavyPenalties = ["bread", "casserole", "cake"]
+            for penalty in heavyPenalties {
+                if combinedText.contains(penalty) {
+                    score -= 400
+                }
+            }
+            // Lighter penalty for cooked (common and healthy)
+            if combinedText.contains("cooked") {
+                score -= 100
+            }
+            if combinedText.contains("raw") || combinedText.contains("fresh") {
+                score += 200
+            }
+        }
+        
+        // General simple vegetables: boost raw, penalize canned/pickled (cooked is acceptable for some)
+        let simpleVegetables = ["lettuce", "cabbage", "kale", "broccoli", "cauliflower", "carrot", "radish", "turnip", "beet", "beetroot"]
+        for veg in simpleVegetables {
+            if queryLower == veg || queryLower == "\(veg)s" {
+                if combinedText.contains("canned") || combinedText.contains("pickled") || combinedText.contains("preserved") {
+                    score -= 300
+                }
+                // Lighter penalty for cooked (common and healthy for broccoli, cauliflower, etc.)
+                if (veg == "broccoli" || veg == "cauliflower" || veg == "carrot" || veg == "beet" || veg == "beetroot") && combinedText.contains("cooked") {
+                    score -= 100
+                }
+                if combinedText.contains("raw") || combinedText.contains("fresh") {
+                    score += 150
+                }
+            }
+        }
+        
+        // Penalty for branded products when searching for generic items
+        if queryWords.count <= 2 && (nameLower.contains("brand") || descLower.contains("brand")) {
+            score -= 20
         }
         
         return score
@@ -586,13 +853,39 @@ class LocalNutritionService {
     // MARK: - Main Integration Method
     
     /// CRITICAL: This method bridges to existing code - returns NutritionInfo (formatted strings)
+    /// Uses scoring function to select best match and rejects poor matches to allow fallback
     func getNutritionForFood(_ foodName: String, amount: Double = 100, unit: String = "g") -> NutritionInfo? {
         // Search for food (searchFoods will wait for database)
-        let foods = searchFoods(query: foodName, limit: 1)
-        guard let food = foods.first else {
+        // Get multiple results to score them properly
+        let foods = searchFoods(query: foodName, limit: 5)
+        guard !foods.isEmpty else {
             print("🔍 LocalNutritionService: No match found for '\(foodName)'")
             return nil
         }
+        
+        // Score all results and select the best match
+        let normalizedQuery = foodName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let scoredResults = foods.map { food -> (food: LocalFood, score: Int) in
+            let score = calculateRelevanceScore(query: normalizedQuery, food: food)
+            return (food: food, score: score)
+        }
+        
+        // Sort by score descending and get the best match
+        let sortedResults = scoredResults.sorted { $0.score > $1.score }
+        guard let bestMatch = sortedResults.first else {
+            print("🔍 LocalNutritionService: No valid match found for '\(foodName)'")
+            return nil
+        }
+        
+        // Minimum score threshold - reject poor matches to allow fallback to USDA/Spoonacular
+        let minimumScore = 50
+        if bestMatch.score < minimumScore {
+            print("⚠️ LocalNutritionService: Best match score (\(bestMatch.score)) below threshold (\(minimumScore)) for '\(foodName)'")
+            print("⚠️ LocalNutritionService: Best match was '\(bestMatch.food.name)' - rejecting to allow fallback")
+            return nil
+        }
+        
+        print("✅ LocalNutritionService: Selected best match '\(bestMatch.food.name)' with score \(bestMatch.score) for '\(foodName)'")
         
         // Convert amount to grams
         let amountInGrams = convertToGrams(amount: amount, unit: unit)
@@ -601,8 +894,8 @@ class LocalNutritionService {
         let clampedAmount = max(10, min(2000, amountInGrams))
         
         // Get nutrition per 100g
-        guard let nutrition = getNutrition(foodId: food.id) else {
-            print("⚠️ LocalNutritionService: No nutrition data for '\(foodName)' (ID: \(food.id))")
+        guard let nutrition = getNutrition(foodId: bestMatch.food.id) else {
+            print("⚠️ LocalNutritionService: No nutrition data for '\(foodName)' (ID: \(bestMatch.food.id))")
             return nil
         }
         

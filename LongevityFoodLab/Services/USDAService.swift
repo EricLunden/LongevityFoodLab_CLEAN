@@ -95,6 +95,52 @@ class USDAService: ObservableObject {
         
         let foodDetail = try JSONDecoder().decode(USDAFoodDetail.self, from: data)
         print("✅ USDAService: Retrieved nutrition data for \(foodDetail.description)")
+        
+        // Log all nutrients returned from USDA
+        print("🔍 USDAService: === NUTRIENT DATA FOR \(foodDetail.description.uppercased()) ===")
+        print("🔍 USDAService: Total nutrients returned: \(foodDetail.foodNutrients.count)")
+        
+        var vitaminB12Found = false
+        var ironFound = false
+        var zincFound = false
+        
+        // Log all nutrients
+        for nutrient in foodDetail.foodNutrients {
+            if let nutrientName = nutrient.nutrient?.name,
+               let amountValue = nutrient.amount {
+                let unit = nutrient.nutrient?.unitName ?? "unknown"
+                print("🔍 USDAService:   - \(nutrientName): \(amountValue) \(unit)")
+                
+                // Check for specific micronutrients
+                let normalizedName = nutrientName.lowercased()
+                if normalizedName.contains("vitamin b12") || normalizedName.contains("cobalamin") {
+                    vitaminB12Found = true
+                    print("✅ USDAService:   ✓ VITAMIN B12 FOUND: \(amountValue) \(unit)")
+                }
+                if normalizedName.contains("iron") && !normalizedName.contains("ferritin") {
+                    ironFound = true
+                    print("✅ USDAService:   ✓ IRON FOUND: \(amountValue) \(unit)")
+                }
+                if normalizedName.contains("zinc") {
+                    zincFound = true
+                    print("✅ USDAService:   ✓ ZINC FOUND: \(amountValue) \(unit)")
+                }
+            } else {
+                print("⚠️ USDAService:   - Nutrient with missing name or amount")
+            }
+        }
+        
+        // Summary check for critical micronutrients
+        print("🔍 USDAService: === MICRONUTRIENT CHECK SUMMARY ===")
+        print("🔍 USDAService: Vitamin B12: \(vitaminB12Found ? "✅ PRESENT" : "❌ MISSING")")
+        print("🔍 USDAService: Iron: \(ironFound ? "✅ PRESENT" : "❌ MISSING")")
+        print("🔍 USDAService: Zinc: \(zincFound ? "✅ PRESENT" : "❌ MISSING")")
+        
+        if !vitaminB12Found || !ironFound || !zincFound {
+            print("⚠️ USDAService: WARNING - Some critical micronutrients are missing from USDA data")
+            print("⚠️ USDAService: This may indicate incomplete data for restaurant/processed items")
+        }
+        
         return foodDetail
     }
     

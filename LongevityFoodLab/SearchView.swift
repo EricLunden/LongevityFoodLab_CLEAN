@@ -1616,15 +1616,33 @@ struct SearchView: View {
             cleanedText = jsonLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
+        // Fix JSON parsing: Escape unescaped control characters (newlines, tabs, etc.) in string values
+        // This handles cases where AI returns JSON with unescaped newlines in string fields
+        cleanedText = sanitizeJSONString(cleanedText)
+        
         guard let analysisData = cleanedText.data(using: .utf8) else {
             throw NSError(domain: "Invalid text encoding", code: 0, userInfo: nil)
         }
         
         // Parse scan type from response and decode analysis
-        let responseDict = try JSONSerialization.jsonObject(with: analysisData) as? [String: Any]
-        let scanTypeString = responseDict?["scanType"] as? String
+        // Use JSONSerialization first to validate, then decode with JSONDecoder
+        var responseDict: [String: Any]?
+        var scanTypeString: String?
+        do {
+            responseDict = try JSONSerialization.jsonObject(with: analysisData) as? [String: Any]
+            scanTypeString = responseDict?["scanType"] as? String
+        } catch {
+            print("⚠️ SearchView: JSONSerialization failed, attempting direct decode: \(error.localizedDescription)")
+        }
         
-        var analysis = try JSONDecoder().decode(FoodAnalysis.self, from: analysisData)
+        var analysis: FoodAnalysis
+        do {
+            analysis = try JSONDecoder().decode(FoodAnalysis.self, from: analysisData)
+        } catch {
+            print("❌ SearchView: JSONDecoder failed: \(error.localizedDescription)")
+            print("❌ SearchView: JSON text (first 500 chars): \(String(cleanedText.prefix(500)))")
+            throw error
+        }
         
         // If scanType wasn't in the decoded struct, add it manually
         if analysis.scanType == nil, let scanTypeString = scanTypeString {
@@ -1646,6 +1664,55 @@ struct SearchView: View {
         }
         
         return analysis
+    }
+    
+    /// Sanitize JSON string by escaping unescaped control characters in string values
+    /// This fixes "Unescaped control character '0xa'" errors from JSONDecoder
+    private func sanitizeJSONString(_ jsonString: String) -> String {
+        var result = ""
+        var inString = false
+        var escapeNext = false
+        
+        for char in jsonString {
+            if escapeNext {
+                result.append(char)
+                escapeNext = false
+                continue
+            }
+            
+            if char == "\\" {
+                result.append(char)
+                escapeNext = true
+                continue
+            }
+            
+            if char == "\"" {
+                inString.toggle()
+                result.append(char)
+                continue
+            }
+            
+            if inString {
+                // Escape control characters within string values
+                switch char {
+                case "\n":
+                    result.append("\\n")
+                case "\r":
+                    result.append("\\r")
+                case "\t":
+                    result.append("\\t")
+                case "\u{0000}"..."\u{001F}": // Control characters
+                    let unicode = char.unicodeScalars.first?.value ?? 0
+                    result.append(String(format: "\\u%04x", unicode))
+                default:
+                    result.append(char)
+                }
+            } else {
+                result.append(char)
+            }
+        }
+        
+        return result
     }
     
     private func analyzeDetectedFoods(_ foods: [String], foodPortions: [FoodPortion]? = nil) {
@@ -1803,23 +1870,25 @@ struct SearchView: View {
                     }
                 } else {
                     print("⚠️ SearchView: Database lookup failed or insufficient foods found, falling back to full AI analysis")
-                    // STEP 3: Fallback to full AI analysis
+                    // STEP 3: Fallback to full AI analysis (no calculatedNutrition available)
                     await MainActor.run {
                         self.performFullAIAnalysis(
                             combinedFoods: combinedFoods,
                             imageHash: imageHash,
-                            imageToSave: imageToSave
+                            imageToSave: imageToSave,
+                            calculatedNutrition: nil
                         )
                     }
                 }
             } catch {
                 print("❌ SearchView: Error calculating nutrition from database: \(error.localizedDescription)")
-                // Fallback to full AI analysis
+                // Fallback to full AI analysis (no calculatedNutrition available due to error)
                 await MainActor.run {
                     self.performFullAIAnalysis(
                         combinedFoods: combinedFoods,
                         imageHash: imageHash,
-                        imageToSave: imageToSave
+                        imageToSave: imageToSave,
+                        calculatedNutrition: nil
                     )
                 }
             }
@@ -1996,6 +2065,8 @@ struct SearchView: View {
                                     suggestions: analysis.suggestions
                                 )
                                 
+                                print("✅ SearchView: Set nutritionInfo on FoodAnalysis - calories: \(calculatedNutrition.calories), protein: \(calculatedNutrition.protein)")
+                                
                                 self.onFoodDetected(mealAnalysis, imageToSave, imageHash, nil)
                                 // Clear the analysis image and detected foods after saving
                                 self.currentAnalysisImage = nil
@@ -2004,11 +2075,12 @@ struct SearchView: View {
                                 
                             case .failure(let error):
                                 print("❌ SearchView: AI analysis failed: \(error.localizedDescription)")
-                                // Fallback to full AI analysis
+                                // Fallback to full AI analysis - preserve calculatedNutrition
                                 self.performFullAIAnalysis(
                                     combinedFoods: combinedFoods,
                                     imageHash: imageHash,
-                                    imageToSave: imageToSave
+                                    imageToSave: imageToSave,
+                                    calculatedNutrition: calculatedNutrition
                                 )
                             }
                         }
@@ -2018,7 +2090,8 @@ struct SearchView: View {
                     self.performFullAIAnalysis(
                         combinedFoods: combinedFoods,
                         imageHash: imageHash,
-                        imageToSave: imageToSave
+                        imageToSave: imageToSave,
+                        calculatedNutrition: calculatedNutrition
                     )
                 }
             }
@@ -2026,8 +2099,14 @@ struct SearchView: View {
     }
     
     /// Perform full AI analysis (fallback when database lookup fails)
-    private func performFullAIAnalysis(combinedFoods: String, imageHash: String?, imageToSave: UIImage?) {
+    /// calculatedNutrition: Optional nutrition already calculated from database (should be preserved if available)
+    private func performFullAIAnalysis(combinedFoods: String, imageHash: String?, imageToSave: UIImage?, calculatedNutrition: NutritionInfo? = nil) {
         print("🔍 SearchView: Performing full AI analysis (fallback)...")
+        if let nutrition = calculatedNutrition {
+            print("🔍 SearchView: Fallback has calculatedNutrition - calories: \(nutrition.calories), protein: \(nutrition.protein)")
+        } else {
+            print("🔍 SearchView: Fallback has NO calculatedNutrition")
+        }
         
         // Create clean food name for title (just ingredient names, no serving sizes)
         let cleanFoodName = detectedFoods.map { $0.name }.joined(separator: ", ")
@@ -2047,6 +2126,9 @@ struct SearchView: View {
                                 
                                 let individualFoodNames = self.detectedFoods.map { $0.name }
                                 
+                                // Use calculatedNutrition if available, otherwise use AI-provided nutrition
+                                let nutritionToUse = calculatedNutrition ?? analysis.nutritionInfo
+                                
                                 let mealAnalysis = FoodAnalysis(
                                     foodName: cleanFoodName, // Use clean name (just ingredients) for title
                                     overallScore: analysis.overallScore,
@@ -2056,12 +2138,18 @@ struct SearchView: View {
                                     ingredients: analysis.ingredients,
                                     bestPreparation: analysis.bestPreparation,
                                     servingSize: analysis.servingSize,
-                                    nutritionInfo: analysis.nutritionInfo,
+                                    nutritionInfo: nutritionToUse, // Use calculatedNutrition if available
                                     scanType: analysis.scanType,
                                     foodNames: individualFoodNames,
                                     foodPortions: analysis.foodPortions,
                                     suggestions: analysis.suggestions
                                 )
+                                
+                                if let nutrition = calculatedNutrition {
+                                    print("✅ SearchView: Fallback - Using calculatedNutrition - calories: \(nutrition.calories), protein: \(nutrition.protein)")
+                                } else {
+                                    print("⚠️ SearchView: Fallback - Using AI-provided nutrition (calculatedNutrition was nil)")
+                                }
                                 
                                 self.onFoodDetected(mealAnalysis, imageToSave, imageHash, nil)
                                 self.currentAnalysisImage = nil
@@ -2074,6 +2162,9 @@ struct SearchView: View {
                                 let individualFoodNames = self.detectedFoods.map { $0.name }
                                 let fallbackAnalysis = AIService.shared.createFallbackAnalysis(for: cleanFoodName)
                                 
+                                // Use calculatedNutrition if available, otherwise use fallback nutrition
+                                let nutritionToUse = calculatedNutrition ?? fallbackAnalysis.nutritionInfo
+                                
                                 let mealFallbackAnalysis = FoodAnalysis(
                                     foodName: cleanFoodName, // Use clean name (just ingredients) for title
                                     overallScore: fallbackAnalysis.overallScore,
@@ -2083,12 +2174,18 @@ struct SearchView: View {
                                     ingredients: fallbackAnalysis.ingredients,
                                     bestPreparation: fallbackAnalysis.bestPreparation,
                                     servingSize: fallbackAnalysis.servingSize,
-                                    nutritionInfo: fallbackAnalysis.nutritionInfo,
+                                    nutritionInfo: nutritionToUse, // Use calculatedNutrition if available
                                     scanType: fallbackAnalysis.scanType,
                                     foodNames: individualFoodNames,
                                     foodPortions: nil,
                                     suggestions: fallbackAnalysis.suggestions
                                 )
+                                
+                                if let nutrition = calculatedNutrition {
+                                    print("✅ SearchView: Fallback error path - Using calculatedNutrition - calories: \(nutrition.calories), protein: \(nutrition.protein)")
+                                } else {
+                                    print("⚠️ SearchView: Fallback error path - Using fallbackAnalysis nutrition (calculatedNutrition was nil)")
+                                }
                                 
                                 self.onFoodDetected(mealFallbackAnalysis, imageToSave, imageHash, nil)
                                 self.currentAnalysisImage = nil
@@ -2104,6 +2201,9 @@ struct SearchView: View {
                     let individualFoodNames = self.detectedFoods.map { $0.name }
                     let fallbackAnalysis = AIService.shared.createFallbackAnalysis(for: cleanFoodName)
                     
+                    // Use calculatedNutrition if available, otherwise use fallback nutrition
+                    let nutritionToUse = calculatedNutrition ?? fallbackAnalysis.nutritionInfo
+                    
                     let mealFallbackAnalysis = FoodAnalysis(
                         foodName: cleanFoodName, // Use clean name (just ingredients) for title
                         overallScore: fallbackAnalysis.overallScore,
@@ -2113,12 +2213,18 @@ struct SearchView: View {
                         ingredients: fallbackAnalysis.ingredients,
                         bestPreparation: fallbackAnalysis.bestPreparation,
                         servingSize: fallbackAnalysis.servingSize,
-                        nutritionInfo: fallbackAnalysis.nutritionInfo,
+                        nutritionInfo: nutritionToUse, // Use calculatedNutrition if available
                         scanType: fallbackAnalysis.scanType,
                         foodNames: individualFoodNames,
                         foodPortions: nil,
                         suggestions: fallbackAnalysis.suggestions
                     )
+                    
+                    if let nutrition = calculatedNutrition {
+                        print("✅ SearchView: Fallback API not working - Using calculatedNutrition - calories: \(nutrition.calories), protein: \(nutrition.protein)")
+                    } else {
+                        print("⚠️ SearchView: Fallback API not working - Using fallbackAnalysis nutrition (calculatedNutrition was nil)")
+                    }
                     
                     self.onFoodDetected(mealFallbackAnalysis, imageToSave, imageHash, nil)
                     self.currentAnalysisImage = nil

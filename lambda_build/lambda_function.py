@@ -4035,6 +4035,7 @@ def extract_recipe_data(soup, url, html_source='main'):
     is_loveandlemons = 'loveandlemons.com' in domain
     is_sally = 'sallysbakingaddiction.com' in domain
     is_foodnetwork_site = is_foodnetwork  # alias for clarity
+    is_barefoot_site = is_barefootcontessa
     
     # Try JSON-LD first (but skip for Food Network, Barefoot Contessa, Food & Wine, and Love and Lemons - use site-specific parser instead)
     json_ld_instructions_for_dedup = []  # Store JSON-LD instructions for deduplication if we fall back
@@ -4908,6 +4909,13 @@ def extract_recipe_data(soup, url, html_source='main'):
                 print(f"LAMBDA/RESULT: FoodNetwork nutrition recovered from schema.org - calories: {nutrition.get('calories')}")
         except Exception as e:
             print(f"LAMBDA/RESULT: FoodNetwork nutrition recovery skipped (non-fatal): {e}")
+    if not nutrition and is_barefoot_site:
+        try:
+            nutrition = extract_from_schema(soup)
+            if nutrition:
+                print(f"LAMBDA/RESULT: BarefootContessa nutrition recovered from schema.org - calories: {nutrition.get('calories')}")
+        except Exception as e:
+            print(f"LAMBDA/RESULT: BarefootContessa nutrition recovery skipped (non-fatal): {e}")
     if nutrition:
         result['nutrition'] = nutrition
         result['nutrition_source'] = nutrition.get('source', 'html')

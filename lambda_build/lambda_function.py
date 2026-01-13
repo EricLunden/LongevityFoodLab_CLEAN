@@ -5883,6 +5883,16 @@ def extract_loveandlemons(soup, url=''):
                             continue
                         instructions.append(text)
                 
+                # Pass-through nutrition if present in schema.org
+                try:
+                    nutrition = extract_from_schema(soup)
+                    if nutrition:
+                        result['nutrition'] = nutrition
+                        result['nutrition_source'] = nutrition.get('source', 'page')
+                        print(f"LAMBDA/LL: Added nutrition from schema.org - calories: {nutrition.get('calories')}")
+                } except Exception as e:
+                    print(f"LAMBDA/LL: Nutrition extraction skipped (non-fatal): {e}")
+                
                 # Extract servings - handle ranges like "4 to 6"
                 raw_yield = data.get('recipeYield') or data.get('yield')
                 if isinstance(raw_yield, (int, float)):

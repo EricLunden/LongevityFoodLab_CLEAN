@@ -298,6 +298,12 @@ class RecipeBrowserService: NSObject, ObservableObject {
         } else {
             servings = 4  // Default to 4 instead of 1
         }
+
+        // Provenance metadata (optional, pass-through only)
+        let servingsSource = data["servings_source"] as? String
+        let nutritionSource = (data["nutrition_source"] as? String) ?? (data["nutritionSource"] as? String)
+        let ingredientSource = data["ingredient_source"] as? String
+        let imageSource = data["image_source"] as? String
         
         // Convert instructions to the expected format
         let formattedInstructions = instructions.enumerated().map { index, instruction in
@@ -317,7 +323,13 @@ class RecipeBrowserService: NSObject, ObservableObject {
             yieldDescription: yieldDescription,
             imageUrl: imageURL,
             rawIngredients: ingredients,
-            rawInstructions: formattedInstructions
+            rawInstructions: formattedInstructions,
+            extractedNutrition: nil,
+            nutritionSource: nutritionSource,
+            servingsSource: servingsSource,
+            ingredientSource: ingredientSource,
+            imageSource: imageSource,
+            aiEnhanced: false
         )
     }
     

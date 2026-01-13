@@ -1910,6 +1910,13 @@ struct RecipeAnalysisView: View {
         
         Task {
             let startTime = Date()
+            let isFallbackServings = recipe.servingsSource?.lowercased() == "fallback"
+            let nutritionSourceFlag = recipe.nutritionSource?.lowercased()
+            let ingredientSourceFlag = recipe.ingredientSource?.lowercased()
+            
+            if isFallbackServings || nutritionSourceFlag == "none" || ingredientSourceFlag == "none" {
+                print("⚠️ RecipeAnalysisView: Low-confidence provenance recipe=\(recipe.id) servings_source=\(recipe.servingsSource ?? "unknown") nutrition_source=\(recipe.nutritionSource ?? "unknown") ingredient_source=\(recipe.ingredientSource ?? "unknown")")
+            }
             do {
                 // Extract ingredient names from recipe
                 let ingredientNames = extractIngredientNames()
@@ -1926,8 +1933,8 @@ struct RecipeAnalysisView: View {
                         updateCachedAnalysisWithNutrition(nutrition)
                     }
                 } else {
-                    // Priority 1: Check if recipe has extracted nutrition from source page
-                    if let extractedNutrition = recipe.extractedNutrition {
+                    // Priority 1: Check if recipe has extracted nutrition from source page (and nutrition_source allows it)
+                    if let extractedNutrition = recipe.extractedNutrition, nutritionSourceFlag == "page" || recipe.nutritionSource == nil {
                         print("✅ RecipeAnalysisView: Using nutrition extracted from recipe source")
                         print("   Calories: \(extractedNutrition.calories)")
                         print("   Protein: \(extractedNutrition.protein)")
@@ -1945,6 +1952,8 @@ struct RecipeAnalysisView: View {
                             print("✅ RecipeAnalysisView: Loaded extracted nutrition in \(String(format: "%.2f", Date().timeIntervalSince(startTime)))s")
                         }
                         return  // Don't calculate, use extracted nutrition
+                    } else if nutritionSourceFlag == "page" && recipe.extractedNutrition == nil {
+                        print("⚠️ RecipeAnalysisView: nutrition_source=page but no extractedNutrition present; proceeding with ingredient-based calculation")
                     }
                     
                     print("🔍 RecipeAnalysisView: Found \(ingredientNames.count) ingredients: \(ingredientNames.joined(separator: ", "))")
@@ -2082,6 +2091,7 @@ struct RecipeAnalysisView: View {
     // Aggregate nutrition from recipe ingredients using actual quantities
     private func aggregateNutritionForRecipeUsingMealMethod(ingredientNames: [String]) async throws -> NutritionInfo? {
         print("🔍 RecipeAnalysisView: Aggregating nutrition for recipe with \(ingredientNames.count) ingredients")
+        let isFallbackServings = recipe.servingsSource?.lowercased() == "fallback"
         
         // DEBUG: Log recipe details for troubleshooting
         print("📊 NUTRITION CALCULATION DEBUG:")
@@ -2104,6 +2114,10 @@ struct RecipeAnalysisView: View {
                     print("   Aggregated TOTAL calories (before division): \(Int(calories))")
                     print("   Recipe servings: \(recipe.servings)")
                     print("   Expected per-serving calories: ~\(Int(calories / Double(recipe.servings)))")
+                }
+                if isFallbackServings {
+                    print("⚠️ RecipeAnalysisView: Skipped per-serving division due to fallback servings")
+                    return nutrition
                 }
                 // Divide by servings to get per-serving nutrition
                 return scaleNutritionByServings(nutrition, servings: recipe.servings)
@@ -2129,9 +2143,11 @@ struct RecipeAnalysisView: View {
             print("⚠️ RecipeAnalysisView: Failed to estimate amounts, using default 100g per ingredient")
             if let nutrition = try await aggregateWithDefaultAmounts(ingredientNames: ingredientNames) {
                 // Divide by servings since default amounts are total recipe amounts
-                if recipe.servings > 1 {
+                if recipe.servings > 1 && !isFallbackServings {
                     print("✅ RecipeAnalysisView: Dividing default-amount nutrition by \(recipe.servings) servings")
                     return scaleNutritionByServings(nutrition, servings: recipe.servings)
+                } else if recipe.servings > 1 && isFallbackServings {
+                    print("⚠️ RecipeAnalysisView: Skipped per-serving division due to fallback servings")
                 }
                 return nutrition
             }

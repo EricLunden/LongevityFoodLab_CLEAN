@@ -51,7 +51,12 @@ struct Recipe: Codable, Identifiable, Equatable {
     
     // Extracted nutrition from recipe page
     var extractedNutrition: NutritionInfo?
-    var nutritionSource: String?  // "extracted" or nil
+    var nutritionSource: String?  // e.g., "page", "calculated", "none", or legacy "extracted"
+    
+    // Provenance metadata (optional)
+    var servingsSource: String?      // e.g., "parsed" | "fallback"
+    var ingredientSource: String?    // e.g., "list" | "instructions" | "merged" | "none"
+    var imageSource: String?         // e.g., "page" | "og" | "none"
     
     // AI enhancement flag (instructions were AI-generated)
     var aiEnhanced: Bool = false
@@ -94,6 +99,9 @@ struct Recipe: Codable, Identifiable, Equatable {
         unitSystem: UnitSystem = .us,
         extractedNutrition: NutritionInfo? = nil,
         nutritionSource: String? = nil,
+        servingsSource: String? = nil,
+        ingredientSource: String? = nil,
+        imageSource: String? = nil,
         aiEnhanced: Bool = false,
         difficulty: String? = nil
     ) {
@@ -131,6 +139,9 @@ struct Recipe: Codable, Identifiable, Equatable {
         self.unitSystem = unitSystem
         self.extractedNutrition = extractedNutrition
         self.nutritionSource = nutritionSource
+        self.servingsSource = servingsSource
+        self.ingredientSource = ingredientSource
+        self.imageSource = imageSource
         self.aiEnhanced = aiEnhanced
         self.difficulty = difficulty
     }
@@ -147,6 +158,11 @@ struct Recipe: Codable, Identifiable, Equatable {
         case dateAdded, lastModified, isFavorite, recipeFingerprint
         case analysisType, isOriginal, improvedVersionID, scaleFactor, unitSystem
         case extractedNutrition, nutritionSource, aiEnhanced, difficulty
+        case servingsSource, ingredientSource, imageSource
+        case nutritionSourceMeta = "nutrition_source"
+        case servingsSourceMeta = "servings_source"
+        case ingredientSourceMeta = "ingredient_source"
+        case imageSourceMeta = "image_source"
     }
     
     // Custom decoder to handle missing scaleFactor and old customCategory in old recipes
@@ -197,7 +213,14 @@ struct Recipe: Codable, Identifiable, Equatable {
         
         // Handle extracted nutrition (optional, for backward compatibility)
         extractedNutrition = try container.decodeIfPresent(NutritionInfo.self, forKey: .extractedNutrition)
-        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource)
+        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource) ??
+            try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
+        servingsSource = try container.decodeIfPresent(String.self, forKey: .servingsSource) ??
+            try container.decodeIfPresent(String.self, forKey: .servingsSourceMeta)
+        ingredientSource = try container.decodeIfPresent(String.self, forKey: .ingredientSource) ??
+            try container.decodeIfPresent(String.self, forKey: .ingredientSourceMeta)
+        imageSource = try container.decodeIfPresent(String.self, forKey: .imageSource) ??
+            try container.decodeIfPresent(String.self, forKey: .imageSourceMeta)
         
         // Handle difficulty (optional, for backward compatibility)
         difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty)
@@ -238,6 +261,9 @@ struct Recipe: Codable, Identifiable, Equatable {
         try container.encode(unitSystem, forKey: .unitSystem)
         try container.encodeIfPresent(extractedNutrition, forKey: .extractedNutrition)
         try container.encodeIfPresent(nutritionSource, forKey: .nutritionSource)
+        try container.encodeIfPresent(servingsSource, forKey: .servingsSource)
+        try container.encodeIfPresent(ingredientSource, forKey: .ingredientSource)
+        try container.encodeIfPresent(imageSource, forKey: .imageSource)
         try container.encodeIfPresent(difficulty, forKey: .difficulty)
     }
     

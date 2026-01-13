@@ -21,12 +21,17 @@ struct ImportedRecipe: Codable, Identifiable {
     
     // Extracted nutrition from recipe page
     let extractedNutrition: NutritionInfo?
-    let nutritionSource: String?  // "extracted" or nil
+    let nutritionSource: String?  // e.g., "page", "calculated", "none", or legacy "extracted"
+    
+    // Provenance metadata (optional)
+    let servingsSource: String?      // e.g., "parsed" | "fallback"
+    let ingredientSource: String?    // e.g., "list" | "instructions" | "merged" | "none"
+    let imageSource: String?         // e.g., "page" | "og" | "none"
     
     // AI enhancement flag (from metadata.ai_enhanced)
     let aiEnhanced: Bool
     
-    init(title: String, sourceUrl: String, ingredients: [String], instructions: String, servings: Int, prepTimeMinutes: Int, cookTimeMinutes: Int? = nil, totalTimeMinutes: Int? = nil, difficulty: String? = nil, yieldDescription: String? = nil, imageUrl: String? = nil, rawIngredients: [String] = [], rawInstructions: String = "", extractedNutrition: NutritionInfo? = nil, nutritionSource: String? = nil, aiEnhanced: Bool = false) {
+    init(title: String, sourceUrl: String, ingredients: [String], instructions: String, servings: Int, prepTimeMinutes: Int, cookTimeMinutes: Int? = nil, totalTimeMinutes: Int? = nil, difficulty: String? = nil, yieldDescription: String? = nil, imageUrl: String? = nil, rawIngredients: [String] = [], rawInstructions: String = "", extractedNutrition: NutritionInfo? = nil, nutritionSource: String? = nil, servingsSource: String? = nil, ingredientSource: String? = nil, imageSource: String? = nil, aiEnhanced: Bool = false) {
         self.id = UUID()
         self.title = title
         self.sourceUrl = sourceUrl
@@ -43,6 +48,9 @@ struct ImportedRecipe: Codable, Identifiable {
         self.rawInstructions = rawInstructions
         self.extractedNutrition = extractedNutrition
         self.nutritionSource = nutritionSource
+        self.servingsSource = servingsSource
+        self.ingredientSource = ingredientSource
+        self.imageSource = imageSource
         self.aiEnhanced = aiEnhanced
     }
     
@@ -53,6 +61,10 @@ struct ImportedRecipe: Codable, Identifiable {
         case cookTime = "cook_time"
         case totalTime = "total_time"
         case yields
+        case servingsSource = "servings_source"
+        case nutritionSourceMeta = "nutrition_source"
+        case ingredientSource = "ingredient_source"
+        case imageSource = "image_source"
     }
     
     init(from decoder: Decoder) throws {
@@ -102,7 +114,11 @@ struct ImportedRecipe: Codable, Identifiable {
         rawIngredients = try container.decodeIfPresent([String].self, forKey: .rawIngredients) ?? []
         rawInstructions = try container.decodeIfPresent(String.self, forKey: .rawInstructions) ?? ""
         extractedNutrition = try container.decodeIfPresent(NutritionInfo.self, forKey: .extractedNutrition)
-        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource)
+        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource) ??
+            try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
+        servingsSource = try container.decodeIfPresent(String.self, forKey: .servingsSource)
+        ingredientSource = try container.decodeIfPresent(String.self, forKey: .ingredientSource)
+        imageSource = try container.decodeIfPresent(String.self, forKey: .imageSource)
         
         // Parse metadata.ai_enhanced flag
         var aiEnhancedFlag = false

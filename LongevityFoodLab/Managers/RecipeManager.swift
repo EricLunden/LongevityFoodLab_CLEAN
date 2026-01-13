@@ -301,6 +301,9 @@ class RecipeManager: ObservableObject, @unchecked Sendable {
             isOriginal: false,
             extractedNutrition: importedRecipe.extractedNutrition,
             nutritionSource: importedRecipe.nutritionSource,
+            servingsSource: importedRecipe.servingsSource,
+            ingredientSource: importedRecipe.ingredientSource,
+            imageSource: importedRecipe.imageSource,
             aiEnhanced: importedRecipe.aiEnhanced,
             difficulty: importedRecipe.difficulty
         )

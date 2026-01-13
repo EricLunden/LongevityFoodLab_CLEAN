@@ -4060,6 +4060,46 @@ def extract_recipe_data(soup, url, html_source='main'):
                         elif isinstance(image_raw, dict):
                             image_url = image_raw.get('url', '')
                         
+                        # Extract nutrition from JSON-LD if present (pass-through only)
+                        nutrition = None
+                        try:
+                            if isinstance(data.get('nutrition'), dict):
+                                n = data['nutrition']
+                                nutrition = {
+                                    'calories': clean_nutrition_value(n.get('calories', '')),
+                                    'protein': clean_nutrition_value(n.get('proteinContent', '')),
+                                    'carbohydrates': clean_nutrition_value(n.get('carbohydrateContent', '')),
+                                    'fat': clean_nutrition_value(n.get('fatContent', '')),
+                                    'saturated_fat': clean_nutrition_value(n.get('saturatedFatContent', '')),
+                                    'fiber': clean_nutrition_value(n.get('fiberContent', '')),
+                                    'sugar': clean_nutrition_value(n.get('sugarContent', '')),
+                                    'sodium': clean_nutrition_value(n.get('sodiumContent', '')),
+                                    'cholesterol': clean_nutrition_value(n.get('cholesterolContent', '')),
+                                    'potassium': clean_nutrition_value(n.get('potassiumContent', '')),
+                                    'calcium': clean_nutrition_value(n.get('calciumContent', '')),
+                                    'iron': clean_nutrition_value(n.get('ironContent', '')),
+                                    'vitamin_a': clean_nutrition_value(n.get('vitaminAContent', '')),
+                                    'vitamin_c': clean_nutrition_value(n.get('vitaminCContent', '')),
+                                    'vitamin_d': clean_nutrition_value(n.get('vitaminDContent', '')),
+                                    'vitamin_e': clean_nutrition_value(n.get('vitaminEContent', '')),
+                                    'vitamin_k': clean_nutrition_value(n.get('vitaminKContent', '')),
+                                    'vitamin_b6': clean_nutrition_value(n.get('vitaminB6Content', '') or n.get('vitaminB6', '')),
+                                    'vitamin_b12': clean_nutrition_value(n.get('vitaminB12Content', '') or n.get('vitaminB12', '')),
+                                    'thiamin': clean_nutrition_value(n.get('thiaminContent', '') or n.get('vitaminB1Content', '') or n.get('thiamin', '')),
+                                    'magnesium': clean_nutrition_value(n.get('magnesiumContent', '')),
+                                    'zinc': clean_nutrition_value(n.get('zincContent', '')),
+                                    'selenium': clean_nutrition_value(n.get('seleniumContent', '')),
+                                    'copper': clean_nutrition_value(n.get('copperContent', '')),
+                                    'manganese': clean_nutrition_value(n.get('manganeseContent', '')),
+                                    'choline': clean_nutrition_value(n.get('cholineContent', '')),
+                                    'iodine': clean_nutrition_value(n.get('iodineContent', '')),
+                                    'folate': clean_nutrition_value(n.get('folateContent', '') or n.get('folicAcidContent', '')),
+                                    'source': 'schema.org'
+                                }
+                        except Exception as e:
+                            print(f"LAMBDA/JSONLD: Nutrition extraction failed (non-fatal): {e}")
+                            nutrition = None
+                        
                         result = {
                             'title': data.get('name', ''),
                             'ingredients': [i for i in data.get('recipeIngredient', []) if i],
@@ -4072,6 +4112,9 @@ def extract_recipe_data(soup, url, html_source='main'):
                             'site_link': url,
                             'source_url': url
                         }
+                        if nutrition:
+                            result['nutrition'] = nutrition
+                            result['nutrition_source'] = 'page'
                         # Love and Lemons: clean ingredient descriptions (remove text after dash or colon)
                         try:
                             from urllib.parse import urlparse as _urlp

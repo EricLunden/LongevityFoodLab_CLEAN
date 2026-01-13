@@ -213,14 +213,18 @@ struct Recipe: Codable, Identifiable, Equatable {
         
         // Handle extracted nutrition (optional, for backward compatibility)
         extractedNutrition = try container.decodeIfPresent(NutritionInfo.self, forKey: .extractedNutrition)
-        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource) ??
-            try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
-        servingsSource = try container.decodeIfPresent(String.self, forKey: .servingsSource) ??
-            try container.decodeIfPresent(String.self, forKey: .servingsSourceMeta)
-        ingredientSource = try container.decodeIfPresent(String.self, forKey: .ingredientSource) ??
-            try container.decodeIfPresent(String.self, forKey: .ingredientSourceMeta)
-        imageSource = try container.decodeIfPresent(String.self, forKey: .imageSource) ??
-            try container.decodeIfPresent(String.self, forKey: .imageSourceMeta)
+        let nutritionSourcePrimary = try container.decodeIfPresent(String.self, forKey: .nutritionSource)
+        let nutritionSourceMeta = try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
+        nutritionSource = nutritionSourcePrimary ?? nutritionSourceMeta
+        let servingsSourcePrimary = try container.decodeIfPresent(String.self, forKey: .servingsSource)
+        let servingsSourceMeta = try container.decodeIfPresent(String.self, forKey: .servingsSourceMeta)
+        servingsSource = servingsSourcePrimary ?? servingsSourceMeta
+        let ingredientSourcePrimary = try container.decodeIfPresent(String.self, forKey: .ingredientSource)
+        let ingredientSourceMeta = try container.decodeIfPresent(String.self, forKey: .ingredientSourceMeta)
+        ingredientSource = ingredientSourcePrimary ?? ingredientSourceMeta
+        let imageSourcePrimary = try container.decodeIfPresent(String.self, forKey: .imageSource)
+        let imageSourceMeta = try container.decodeIfPresent(String.self, forKey: .imageSourceMeta)
+        imageSource = imageSourcePrimary ?? imageSourceMeta
         
         // Handle difficulty (optional, for backward compatibility)
         difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty)

@@ -114,11 +114,18 @@ struct ImportedRecipe: Codable, Identifiable {
         rawIngredients = try container.decodeIfPresent([String].self, forKey: .rawIngredients) ?? []
         rawInstructions = try container.decodeIfPresent(String.self, forKey: .rawInstructions) ?? ""
         extractedNutrition = try container.decodeIfPresent(NutritionInfo.self, forKey: .extractedNutrition)
-        nutritionSource = try container.decodeIfPresent(String.self, forKey: .nutritionSource) ??
-            try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
-        servingsSource = try container.decodeIfPresent(String.self, forKey: .servingsSource)
-        ingredientSource = try container.decodeIfPresent(String.self, forKey: .ingredientSource)
-        imageSource = try container.decodeIfPresent(String.self, forKey: .imageSource)
+        let nutritionSourcePrimary = try container.decodeIfPresent(String.self, forKey: .nutritionSource)
+        let nutritionSourceMeta = try container.decodeIfPresent(String.self, forKey: .nutritionSourceMeta)
+        nutritionSource = nutritionSourcePrimary ?? nutritionSourceMeta
+        
+        let servingsSourcePrimary = try container.decodeIfPresent(String.self, forKey: .servingsSource)
+        servingsSource = servingsSourcePrimary
+        
+        let ingredientSourcePrimary = try container.decodeIfPresent(String.self, forKey: .ingredientSource)
+        ingredientSource = ingredientSourcePrimary
+        
+        let imageSourcePrimary = try container.decodeIfPresent(String.self, forKey: .imageSource)
+        imageSource = imageSourcePrimary
         
         // Parse metadata.ai_enhanced flag
         var aiEnhancedFlag = false

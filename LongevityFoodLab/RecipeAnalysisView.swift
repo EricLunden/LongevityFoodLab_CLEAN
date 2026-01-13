@@ -1914,6 +1914,18 @@ struct RecipeAnalysisView: View {
             let nutritionSourceFlag = recipe.nutritionSource?.lowercased()
             let ingredientSourceFlag = recipe.ingredientSource?.lowercased()
             
+            // Phase 4A: If the source explicitly provides nutrition, use it directly and skip recomputation.
+            if nutritionSourceFlag == "page", let extractedNutrition = recipe.extractedNutrition {
+                await MainActor.run {
+                    loadedNutritionInfo = extractedNutrition
+                    isLoadingNutritionInfo = false
+                    estimatedServingSize = estimateServingSize()
+                    updateCachedAnalysisWithNutrition(extractedNutrition)
+                    print("✅ RecipeAnalysisView: Using page-provided nutrition (source=page), skipping ingredient aggregation")
+                }
+                return
+            }
+            
             if isFallbackServings || nutritionSourceFlag == "none" || ingredientSourceFlag == "none" {
                 print("⚠️ RecipeAnalysisView: Low-confidence provenance recipe=\(recipe.id) servings_source=\(recipe.servingsSource ?? "unknown") nutrition_source=\(recipe.nutritionSource ?? "unknown") ingredient_source=\(recipe.ingredientSource ?? "unknown")")
             }

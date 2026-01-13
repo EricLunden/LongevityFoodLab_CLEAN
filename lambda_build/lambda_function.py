@@ -2528,6 +2528,32 @@ def finalize_response(recipe_data, url):
         if tier_used != 'ai':
             print(f"LAMBDA/ERROR: AI result tier was changed to '{tier_used}' — restoring to 'ai'")
             recipe_data['metadata']['tier_used'] = 'ai'
+
+    # --- Provenance metadata (non-invasive; does not change values) ---
+    # Servings source: mark fallback vs parsed
+    if 'servings_source' not in recipe_data:
+        if recipe_data.get('servings') in [None, '4'] and recipe_data.get('metadata', {}).get('servings_defaulted') is True:
+            recipe_data['servings_source'] = 'fallback'
+        elif recipe_data.get('servings') is not None:
+            recipe_data['servings_source'] = 'parsed'
+    # Nutrition source: page vs none (no calculation done here)
+    if 'nutrition_source' not in recipe_data:
+        if recipe_data.get('nutrition'):
+            recipe_data['nutrition_source'] = 'page'
+        else:
+            recipe_data['nutrition_source'] = 'none'
+    # Ingredient source: list vs none (instructions extraction not performed)
+    if 'ingredient_source' not in recipe_data:
+        if recipe_data.get('ingredients'):
+            recipe_data['ingredient_source'] = 'list'
+        else:
+            recipe_data['ingredient_source'] = 'none'
+    # Image source: mark presence; cannot distinguish og vs page here
+    if 'image_source' not in recipe_data:
+        if recipe_data.get('image'):
+            recipe_data['image_source'] = 'page'
+        else:
+            recipe_data['image_source'] = 'none'
     
     # Return response
     return {
@@ -2648,10 +2674,13 @@ def lambda_handler(event, context):
                 servings = recipe_data.get('servings')
                 if servings is None:
                     recipe_data['servings'] = '4'  # Default
+                    recipe_data.setdefault('metadata', {})['servings_defaulted'] = True
                 elif isinstance(servings, int):
                     recipe_data['servings'] = str(servings)
+                    recipe_data.setdefault('metadata', {})['servings_defaulted'] = False
                 elif not isinstance(servings, str):
                     recipe_data['servings'] = str(servings) if servings else '4'
+                    recipe_data.setdefault('metadata', {})['servings_defaulted'] = servings is None or servings == ''
                 
                 # Ensure all required fields
                 if 'image' not in recipe_data:

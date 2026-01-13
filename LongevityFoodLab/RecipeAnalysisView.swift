@@ -2278,7 +2278,20 @@ struct RecipeAnalysisView: View {
     /// Get nutrition for an ingredient at a specific amount
     private func getNutritionForIngredientAtAmount(foodName: String, amount: Double) async throws -> NutritionInfo? {
         // Try tiered lookup first (USDA → Spoonacular → AI)
-        if let nutrition = try await NutritionService.shared.getNutritionForFood(foodName, amount: amount, unit: "g") {
+        let context = NutritionNormalizationContext(
+            canonicalFoodName: foodName,
+            quantity: amount,
+            unit: "g",
+            gramsKnown: true,
+            perServingProvided: nil,
+            per100gProvided: nil,
+            servings: recipe.servings,
+            ingredientNames: nil,
+            timestamp: nil,
+            imageHash: nil,
+            inputMethod: nil
+        )
+        if let nutrition = try await NutritionNormalizationPipeline.shared.getNutritionForFood(foodName, amount: amount, unit: "g", context: context) {
             print("✅ RecipeAnalysisView: Found nutrition via tiered lookup at \(Int(amount))g")
             return nutrition
         }
@@ -2302,7 +2315,20 @@ struct RecipeAnalysisView: View {
         print("🔍 RecipeAnalysisView: Getting nutrition for '\(foodName)'")
         
         // Try tiered lookup first (USDA → Spoonacular → AI)
-        if let nutrition = try await NutritionService.shared.getNutritionForFood(foodName) {
+        let context = NutritionNormalizationContext(
+            canonicalFoodName: foodName,
+            quantity: nil,
+            unit: nil,
+            gramsKnown: nil,
+            perServingProvided: nil,
+            per100gProvided: nil,
+            servings: recipe.servings,
+            ingredientNames: extractIngredientNames(),
+            timestamp: nil,
+            imageHash: nil,
+            inputMethod: nil
+        )
+        if let nutrition = try await NutritionNormalizationPipeline.shared.getNutritionForFood(foodName, context: context) {
             print("✅ RecipeAnalysisView: Found nutrition via tiered lookup")
             return nutrition
         }
@@ -2579,7 +2605,20 @@ struct RecipeAnalysisView: View {
     private func getNutritionForIngredientWithUnit(foodName: String, amount: Double, unit: String) async throws -> NutritionInfo? {
         // Try NutritionService first (includes Local DB → USDA → Spoonacular)
         // This ensures we check the local database first for instant, offline results
-        if let nutrition = try await NutritionService.shared.getNutritionForFood(foodName, amount: amount, unit: unit) {
+        let context = NutritionNormalizationContext(
+            canonicalFoodName: foodName,
+            quantity: amount,
+            unit: unit,
+            gramsKnown: unit.lowercased() == "g",
+            perServingProvided: nil,
+            per100gProvided: nil,
+            servings: recipe.servings,
+            ingredientNames: extractIngredientNames(),
+            timestamp: nil,
+            imageHash: nil,
+            inputMethod: nil
+        )
+        if let nutrition = try await NutritionNormalizationPipeline.shared.getNutritionForFood(foodName, amount: amount, unit: unit, context: context) {
             print("✅ RecipeAnalysisView: Found nutrition via tiered lookup for '\(foodName)' with unit '\(unit)'")
             return nutrition
         }

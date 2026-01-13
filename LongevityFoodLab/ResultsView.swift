@@ -2060,7 +2060,20 @@ struct ResultsView: View {
             }
             
             // Get nutrition for the estimated serving size (not default 100g)
-            if let nutrition = try await NutritionService.shared.getNutritionForFood(analysis.foodName, amount: servingInfo.weightGrams, unit: "g") {
+            let context = NutritionNormalizationContext(
+                canonicalFoodName: analysis.foodName,
+                quantity: servingInfo.weightGrams,
+                unit: "g",
+                gramsKnown: true,
+                perServingProvided: nil,
+                per100gProvided: nil,
+                servings: nil,
+                ingredientNames: nil,
+                timestamp: nil,
+                imageHash: nil,
+                inputMethod: nil
+            )
+            if let nutrition = try await NutritionService.shared.getNutritionForFood(analysis.foodName, amount: servingInfo.weightGrams, unit: "g", context: context) {
                 print("✅ ResultsView: Found nutrition via tiered lookup for \(servingInfo.size) (\(Int(servingInfo.weightGrams))g)")
                 return nutrition
             }
@@ -6153,20 +6166,19 @@ struct AddToMealTrackerSheet: View {
                 print("🍽️ AddToMealTrackerSheet: No duplicate found, will save new meal")
             }
         } else {
-            // Image entry: Use standard duplicate detection with imageHash matching
-            let thirtyMinutesAgo = Date().addingTimeInterval(-1800)
-            existingMeal = mealStorageManager.trackedMeals.first { meal in
-                let nameMatch = meal.name == mealNameToUse
-                let scoreMatch = abs(meal.healthScore - Double(analysis.overallScore)) < 1.0
-                let recentMatch = meal.timestamp > thirtyMinutesAgo
-                
-                // For image entries, also check imageHash match
-                let imageHashMatch = imageHash != nil && meal.imageHash == imageHash
-                let analysisMatch = meal.originalAnalysis?.overallScore == analysis.overallScore &&
-                                   meal.originalAnalysis?.foodName == analysis.foodName
-                
-                return (nameMatch && scoreMatch && recentMatch) || imageHashMatch || analysisMatch
-            }
+            // Image entry: Use centralized duplicate detection (same logic as before)
+            let dedupContext = ImageDeduplicationContext(
+                existingMeals: mealStorageManager.trackedMeals,
+                mealName: mealNameToUse,
+                healthScore: Double(analysis.overallScore),
+                imageHash: imageHash,
+                originalAnalysis: analysis,
+                includeImageHashMatch: true,
+                includeAnalysisMatch: true,
+                windowSeconds: 1800,
+                now: Date()
+            )
+            existingMeal = NutritionNormalizationPipeline.shared.findDuplicateImageMeal(using: dedupContext)
         }
         
         if let existing = existingMeal {

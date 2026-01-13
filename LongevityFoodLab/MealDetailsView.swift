@@ -1529,7 +1529,20 @@ struct MealDetailsView: View {
                     }
                 } else {
                     // Single food: Try tiered lookup
-                    if let tieredNutrition = try await NutritionService.shared.getNutritionForFood(analysis.foodName) {
+                    let context = NutritionNormalizationContext(
+                        canonicalFoodName: analysis.foodName,
+                        quantity: nil,
+                        unit: nil,
+                        gramsKnown: nil,
+                        perServingProvided: nil,
+                        per100gProvided: nil,
+                        servings: nil,
+                        ingredientNames: analysis.foodNames,
+                        timestamp: analysis.analysisTimestamp,
+                        imageHash: nil,
+                        inputMethod: nil
+                    )
+                    if let tieredNutrition = try await NutritionService.shared.getNutritionForFood(analysis.foodName, context: context) {
                         nutrition = tieredNutrition
                         let duration = Date().timeIntervalSince(startTime)
                         print("✅ MealDetailsView: Loaded nutrition via tiered lookup in \(String(format: "%.2f", duration))s")
@@ -1592,7 +1605,20 @@ struct MealDetailsView: View {
                         }
                         
                         // Use tiered lookup with estimated serving size
-                        if let nutrition = try await NutritionService.shared.getNutritionForFood(foodName, amount: servingInfo.weightGrams, unit: "g") {
+                        let context = NutritionNormalizationContext(
+                            canonicalFoodName: foodName,
+                            quantity: servingInfo.weightGrams,
+                            unit: "g",
+                            gramsKnown: true,
+                            perServingProvided: nil,
+                            per100gProvided: nil,
+                            servings: nil,
+                            ingredientNames: nil,
+                            timestamp: nil,
+                            imageHash: nil,
+                            inputMethod: nil
+                        )
+                        if let nutrition = try await NutritionService.shared.getNutritionForFood(foodName, amount: servingInfo.weightGrams, unit: "g", context: context) {
                             print("✅ MealDetailsView: Found nutrition for '\(foodName)' at \(servingInfo.size) (\(Int(servingInfo.weightGrams))g)")
                             return (foodName, nutrition)
                         } else {

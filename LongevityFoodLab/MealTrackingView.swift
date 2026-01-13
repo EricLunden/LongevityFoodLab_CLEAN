@@ -5617,20 +5617,19 @@ extension MealTrackingView {
                 return nameMatch && scoreMatch && isTextVoiceEntry
             }
         } else {
-            // Image entry: Use standard duplicate detection with imageHash matching
-            // Don't change behavior for image entries
-            existingMeal = mealStorageManager.trackedMeals.first { meal in
-                let nameMatch = meal.name == analysis.foodName
-                let scoreMatch = abs(meal.healthScore - Double(analysis.overallScore)) < 1.0
-                let recentMatch = meal.timestamp > thirtyMinutesAgo
-                
-                // For image entries, also check imageHash match
-                let imageHashMatch = imageHash != nil && meal.imageHash == imageHash
-                let analysisMatch = meal.originalAnalysis?.overallScore == analysis.overallScore &&
-                                   meal.originalAnalysis?.foodName == analysis.foodName
-                
-                return (nameMatch && scoreMatch && recentMatch) || imageHashMatch || analysisMatch
-            }
+            // Image entry: Use centralized duplicate detection (same logic as before)
+            let dedupContext = ImageDeduplicationContext(
+                existingMeals: mealStorageManager.trackedMeals,
+                mealName: analysis.foodName,
+                healthScore: Double(analysis.overallScore),
+                imageHash: imageHash,
+                originalAnalysis: analysis,
+                includeImageHashMatch: true,
+                includeAnalysisMatch: true,
+                windowSeconds: 1800,
+                now: Date()
+            )
+            existingMeal = NutritionNormalizationPipeline.shared.findDuplicateImageMeal(using: dedupContext)
         }
         
         if let existing = existingMeal {

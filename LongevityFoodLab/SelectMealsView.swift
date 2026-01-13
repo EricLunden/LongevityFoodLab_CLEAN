@@ -425,14 +425,19 @@ struct SelectMealsView: View {
             foodCacheManager.cacheAnalysis(analysis, scanType: scanType, inputMethod: nil) // Image entry
         }
         
-        // Check for duplicate meal (same name, saved within last 30 minutes, similar score)
-        // Extended window to catch duplicates even if user navigates away and comes back
-        let thirtyMinutesAgo = Date().addingTimeInterval(-1800)
-        let existingMeal = mealStorageManager.trackedMeals.first { meal in
-            meal.name == analysis.foodName &&
-            meal.timestamp > thirtyMinutesAgo &&
-            abs(meal.healthScore - Double(analysis.overallScore)) < 1.0 // Same score (within 1 point)
-        }
+        // Check for duplicate meal (same name, saved within last 30 minutes, similar score) using centralized logic
+        let dedupContext = ImageDeduplicationContext(
+            existingMeals: mealStorageManager.trackedMeals,
+            mealName: analysis.foodName,
+            healthScore: Double(analysis.overallScore),
+            imageHash: hashToUse,
+            originalAnalysis: nil,
+            includeImageHashMatch: false,   // Preserve existing behavior (SelectMealsView did not use imageHash match)
+            includeAnalysisMatch: false,    // Preserve existing behavior (no analysis match check here)
+            windowSeconds: 1800,
+            now: Date()
+        )
+        let existingMeal = NutritionNormalizationPipeline.shared.findDuplicateImageMeal(using: dedupContext)
         
         if let existing = existingMeal {
             let secondsAgo = Int(Date().timeIntervalSince(existing.timestamp))

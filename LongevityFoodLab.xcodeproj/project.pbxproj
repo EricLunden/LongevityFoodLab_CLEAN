@@ -71,7 +71,6 @@
 		C94239812E4143C6003DC99D /* Exceptions for "LongevityFoodLab" folder in "LongevityFoodLab" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				AppDelegate.macOS.swift,
 				Info.plist,
 			);
 			target = C957D2742E22D34200D8B940 /* LongevityFoodLab */;

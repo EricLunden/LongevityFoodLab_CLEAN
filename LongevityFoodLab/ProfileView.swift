@@ -4,9 +4,11 @@ import PhotosUI
 struct ProfileView: View {
     @StateObject private var authManager = AuthManager.shared
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
+    @EnvironmentObject var petProfileStore: PetProfileStore
     @State private var showingLogoutAlert = false
     @State private var showingProfileSettings = false
     @State private var showingDataExport = false
+    @State private var showingPetProfileEditor = false
     @State private var showingImagePicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var refreshTrigger = false
@@ -54,6 +56,9 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showingDataExport) {
                 DataExportView()
+            }
+            .sheet(isPresented: $showingPetProfileEditor) {
+                PetProfileEditorView()
             }
             .photosPicker(isPresented: $showingImagePicker, selection: $selectedPhoto, matching: .images)
             .onChange(of: selectedPhoto) { oldValue, newPhoto in
@@ -335,6 +340,28 @@ struct ProfileView: View {
                         .foregroundColor(.blue)
                     Text("Edit Health Profile")
                         .foregroundColor(.blue)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                }
+                .padding()
+                .background(Color(UIColor.systemBackground))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.green.opacity(0.6), lineWidth: 0.5)
+                )
+            }
+            
+            Button(action: {
+                showingPetProfileEditor = true
+            }) {
+                HStack {
+                    Image(systemName: "pawprint.circle")
+                        .foregroundColor(.orange)
+                    Text("Edit Pet(s) Health Profile")
+                        .foregroundColor(.orange)
                     Spacer()
                     Image(systemName: "chevron.right")
                         .foregroundColor(.secondary)

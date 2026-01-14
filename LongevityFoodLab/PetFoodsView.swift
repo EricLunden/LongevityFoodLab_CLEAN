@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum PetFoodSortOption: String, CaseIterable {
     case recency = "Most Recent"
@@ -25,8 +26,17 @@ struct PetFoodsView: View {
     @State private var showingDeleteConfirmation = false
     @State private var displayedFoodCount = 6
     @State private var showingSearch = false
+    @State private var showingPetProfileEditor = false
+    @EnvironmentObject var petProfileStore: PetProfileStore
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.dismiss) private var dismiss
+    
+    private var pets: [PetProfile] { petProfileStore.pets }
+    private var activePet: PetProfile? { petProfileStore.activePet }
+    private var hasActivePetImage: Bool {
+        guard let data = activePet?.imageData else { return false }
+        return UIImage(data: data) != nil
+    }
     
     var body: some View {
         NavigationView {
@@ -40,13 +50,15 @@ struct PetFoodsView: View {
                 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Logo Header (same position as recipes)
-                        logoHeaderSection
+                        if hasActivePetImage {
+                            petHeaderSection
+                        }
                         
-                        // Pet Foods Top Box (shadowed black box like recipes)
-                        petFoodsTopBox
+                        petConditionsSummarySection
                         
-                        // Score New and Compare Buttons (below box, matching box width)
+                        managementBar
+                        
+                        // Score New and Compare Buttons
                         actionButtonsSection
                         
                         // Recently Analyzed Section (list/grid view like Score screen)
@@ -105,105 +117,116 @@ struct PetFoodsView: View {
                 }
                 .presentationBackground(.clear)
             }
+            .sheet(isPresented: $showingPetProfileEditor) {
+                PetProfileEditorView()
+            }
         }
     }
     
     // MARK: - Logo Header Section
-    private var logoHeaderSection: some View {
-        Image("LogoHorizontal")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(height: 37)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .padding(.top, -8)
-            .padding(.bottom, 14) // 14pts more padding before Pet Foods box
+    @ViewBuilder
+    private var petHeaderSection: some View {
+        if activePet != nil {
+            PetHeaderView(pet: activePet)
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { value in
+                            guard pets.count > 1 else { return }
+                            
+                            let horizontal = value.translation.width
+                            let vertical = value.translation.height
+                            let isHorizontal = abs(horizontal) > abs(vertical)
+                            let threshold: CGFloat = 40
+                            
+                            guard isHorizontal, abs(horizontal) > threshold else { return }
+                            
+                            if horizontal < 0 {
+                                activateNextPet()
+                            } else {
+                                activatePreviousPet()
+                            }
+                        }
+                )
+        }
     }
     
-    // MARK: - Pet Foods Top Box
-    private var petFoodsTopBox: some View {
-        VStack(spacing: 16) {
-            // Title with Icon (centered)
-            HStack(spacing: 16) {
-                // Pet Icon with Gradient (left of title) - matching fork.knife gradient
-                Image(systemName: "pawprint.fill")
-                    .font(.system(size: 60, weight: .medium))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.orange, Color(red: 1.0, green: 0.6, blue: 0.0)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                
-                Text("Pet Foods")
-                    .font(.system(size: 40, weight: colorScheme == .dark ? .bold : .heavy, design: .default))
-                    .foregroundColor(colorScheme == .dark ? .white : .secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            
-            // Hairline separator (more visible)
-            Divider()
-                .background(colorScheme == .dark ? Color.white.opacity(0.5) : Color.black.opacity(0.3))
-                .frame(height: 1)
-                .padding(.horizontal, -30) // Extend to box edges
-            
-            // Edit and Search Buttons (inside box at bottom)
-            HStack {
-                // Edit Button (flush left) - always visible like recipes screen
-                Button(action: {
-                    if !selectedFoodIDs.isEmpty {
-                        showingDeleteConfirmation = true
-                    } else {
-                        isEditing.toggle()
-                        if !isEditing {
-                            selectedFoodIDs.removeAll()
-                        }
+    // MARK: - Pet Conditions Summary
+    @ViewBuilder
+    private var petConditionsSummarySection: some View {
+        if let pet = activePet {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Health Conditions")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Button("Edit") {
+                        showingPetProfileEditor = true
                     }
-                }) {
-                    Text(editButtonText)
+                    .font(.subheadline)
+                    .foregroundColor(.blue)
+                }
+                
+                if let conditions = pet.conditions, !conditions.isEmpty {
+                    Text(conditions.joined(separator: ", "))
                         .font(.subheadline)
-                        .foregroundColor(.blue)
-                }
-                
-                Spacer()
-                
-                // Search Button (flush right) - shows "Clear Search" when searching
-                if searchQuery.isEmpty {
-                    Button(action: {
-                        showingSearch = true
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.subheadline)
-                            Text("Search")
-                                .font(.subheadline)
-                        }
-                        .foregroundColor(.blue)
-                    }
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
                 } else {
-                    Button(action: {
-                        searchQuery = ""
-                    }) {
-                        Text("Clear Search")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.blue)
-                    }
+                    Text("No conditions set")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal, 10) // Padding for buttons within the box
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 16)
-        .padding(.bottom, 20)
-        .padding(.horizontal, 30)
-        .background(colorScheme == .dark ? Color.black : Color.white)
-        .cornerRadius(16)
-        .shadow(color: colorScheme == .dark ? .white.opacity(0.6) : .black.opacity(0.15), radius: 16, x: 0, y: 4)
+    }
+    
+    // MARK: - Management Bar (Edit/Delete + Search)
+    private var managementBar: some View {
+        HStack {
+            Button(action: {
+                if !selectedFoodIDs.isEmpty {
+                    showingDeleteConfirmation = true
+                } else {
+                    isEditing.toggle()
+                    if !isEditing {
+                        selectedFoodIDs.removeAll()
+                    }
+                }
+            }) {
+                Text(editButtonText)
+                    .font(.subheadline)
+                    .foregroundColor(.blue)
+            }
+            
+            Spacer()
+            
+            if searchQuery.isEmpty {
+                Button(action: {
+                    showingSearch = true
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.subheadline)
+                        Text("Search")
+                            .font(.subheadline)
+                    }
+                }
+                .foregroundColor(.blue)
+            } else {
+                Button(action: {
+                    searchQuery = ""
+                }) {
+                    Text("Clear Search")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundColor(.blue)
+            }
+        }
         .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.bottom, 12)
     }
     
     // MARK: - Action Buttons Section (below box)
@@ -216,7 +239,7 @@ struct PetFoodsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "plus.circle.fill")
                         .font(.subheadline)
-                    Text("Score New")
+                    Text("Score New Pet Food")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
@@ -244,7 +267,7 @@ struct PetFoodsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.left.arrow.right.circle.fill")
                         .font(.subheadline)
-                    Text("Compare")
+                    Text("Compare Pet Foods")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
@@ -597,6 +620,31 @@ struct PetFoodsView: View {
         case .scoreLowHigh:
             return analyses.sorted { $0.fullAnalysis.overallScore < $1.fullAnalysis.overallScore }
         }
+    }
+    
+    // MARK: - Pet Switching
+    private func activateNextPet() {
+        guard pets.count > 1 else { return }
+        guard let currentID = activePet?.id,
+              let currentIndex = pets.firstIndex(where: { $0.id == currentID }) else {
+            petProfileStore.setActivePet(id: pets.first?.id)
+            return
+        }
+        
+        let nextIndex = (currentIndex + 1) % pets.count
+        petProfileStore.setActivePet(id: pets[nextIndex].id)
+    }
+    
+    private func activatePreviousPet() {
+        guard pets.count > 1 else { return }
+        guard let currentID = activePet?.id,
+              let currentIndex = pets.firstIndex(where: { $0.id == currentID }) else {
+            petProfileStore.setActivePet(id: pets.first?.id)
+            return
+        }
+        
+        let previousIndex = (currentIndex - 1 + pets.count) % pets.count
+        petProfileStore.setActivePet(id: pets[previousIndex].id)
     }
     
     // MARK: - Edit Button Text

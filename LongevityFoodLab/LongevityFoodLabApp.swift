@@ -18,6 +18,7 @@ struct LongevityFoodLabApp: App {
     @StateObject private var healthProfileManager = UserHealthProfileManager.shared
     @StateObject private var deepLinkManager = DeepLinkManager.shared
     @StateObject private var recipeManager = RecipeManager.shared
+    @StateObject private var petProfileStore = PetProfileStore()
     // @StateObject private var recipeManager = iCloudRecipeManager.shared
     @State private var hasCheckedForPendingRecipe = false
     
@@ -322,6 +323,7 @@ struct LongevityFoodLabApp: App {
             if healthProfileManager.profileExists() {
                 // User has completed onboarding, show main app
                 ContentView()
+                    .environmentObject(petProfileStore)
                     .onAppear {
                         // Ensure user is authenticated for profile features
                         if !authManager.isAuthenticated {
@@ -479,6 +481,7 @@ struct LongevityFoodLabApp: App {
             } else {
                 // User hasn't completed onboarding, show welcome/quiz flow
                 WelcomeView()
+                    .environmentObject(petProfileStore)
             }
         }
     }
